@@ -3,8 +3,12 @@
 将 Anthropic API 协议转写为多种后端协议（OpenAI、Claude、Gemini）的网络代理。
 
 [![Go](https://github.com/acshmily/llm-proxy/actions/workflows/go.yml/badge.svg)](https://github.com/acshmily/llm-proxy/actions/workflows/go.yml)
+[![Codecov](https://codecov.io/gh/acshmily/llm-proxy/branch/main/graph/badge.svg)](https://codecov.io/gh/acshmily/llm-proxy)
+[![Go Report Card](https://goreportcard.com/badge/github.com/acshmily/llm-proxy)](https://goreportcard.com/report/github.com/acshmily/llm-proxy)
 [![Docker Pulls](https://img.shields.io/docker/pulls/acshmily/llm-proxy)](https://hub.docker.com/repository/docker/acshmily/llm-proxy/)
 [![Docker Image Size](https://img.shields.io/docker/image-size/acshmily/llm-proxy/latest)](https://hub.docker.com/repository/docker/acshmily/llm-proxy/)
+[![License](https://img.shields.io/github/license/acshmily/llm-proxy)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/acshmily/llm-proxy)](https://github.com/acshmily/llm-proxy/releases)
 
 **Docker 镜像：** [`acshmily/llm-proxy`](https://hub.docker.com/repository/docker/acshmily/llm-proxy/)
 
@@ -404,6 +408,29 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 ./proxy -version
 ```
 
+## 文档
+
+- **[贡献指南](CONTRIBUTING.md)** - 开发规范、测试要求、提交流程
+- **[变更日志](CHANGELOG.md)** - 版本历史、升级指南
+- **[防护机制说明](docs/protection.md)** - 三层防护详细配置
+- **[WebSocket 隧道指南](docs/ws-client-guide.md)** - 客户端使用文档
+
+## 相关项目
+
+- [Superpowers](https://github.com/garretth/superpowers) - AI 驱动开发技能扩展
+
 ## 许可证
 
-MIT
+MIT License - 详见 [LICENSE](LICENSE) 文件
+
+## 贡献
+
+欢迎贡献代码、报告问题或提出建议！
+
+1. Fork 本项目
+2. 创建功能分支 (`git checkout -b feature/amazing-feature`)
+3. 提交更改 (`git commit -m 'feat: add amazing feature'`)
+4. 推送到分支 (`git push origin feature/amazing-feature`)
+5. 创建 Pull Request
+
+详见 [贡献指南](CONTRIBUTING.md)。
