@@ -2,7 +2,13 @@
 
 ## 简介
 
-WebSocket 隧道客户端是一个本地 HTTP 代理服务器，使应用程序无需修改代码即可通过 WebSocket 隧道与服务端通信。配置代理后，所有 HTTP 请求自动封装到 WebSocket 消息中发送到服务端。
+WebSocket 隧道客户端是一个本地 HTTP 服务器，使应用程序可以直接通过 WebSocket 隧道与服务端通信。应用程序只需将请求发送到本地 8081 端口，请求自动封装到 WebSocket 消息中发送到服务端，**无需修改应用程序代码**。
+
+**工作原理：**
+- ws-client 监听本地 `:8081` 端口
+- 应用程序发送 HTTP 请求到 `http://localhost:8081`
+- 请求通过 WebSocket 隧道转发到服务端
+- 服务端响应返回给应用程序
 
 ## 安装方法
 
@@ -69,11 +75,37 @@ health:
 ./ws-client --config configs/client-config.yaml
 ```
 
-### 3. 配置应用程序代理
+### 3. 使用客户端
 
-在应用程序中配置 HTTP 代理为 `http://localhost:8081`：
+**直接访问模式（推荐）：**
+
+应用程序直接发送 HTTP 请求到 `http://localhost:8081`，无需配置代理：
 
 **Python 示例：**
+```python
+import requests
+
+# 直接请求本地 ws-client，无需代理配置
+response = requests.post(
+    "http://localhost:8081/v1/messages",
+    headers={"Authorization": "Bearer sk-client-1"},
+    json={"model": "claude-3", "messages": [{"role": "user", "content": "Hello"}]}
+)
+```
+
+**cURL 示例：**
+```bash
+# 直接请求
+curl http://localhost:8081/v1/messages \
+  -H "Authorization: Bearer sk-client-1" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"claude-3","messages":[...]}'
+```
+
+**HTTP 代理模式（可选）：**
+
+如果应用程序需要访问外部 API 并通过隧道转发，可配置 HTTP 代理：
+
 ```python
 import requests
 
@@ -82,12 +114,13 @@ proxies = {
     "https": "http://localhost:8081",
 }
 
-response = requests.get("https://api.openai.com/v1/models", proxies=proxies)
+# 通过代理发送请求
+response = requests.get("https://api.example.com/...", proxies=proxies)
 ```
 
-**cURL 示例：**
 ```bash
-curl -x http://localhost:8081 https://api.openai.com/v1/models
+# cURL 代理模式
+curl -x http://localhost:8081 https://api.example.com/...
 ```
 
 ### 4. 验证连接
