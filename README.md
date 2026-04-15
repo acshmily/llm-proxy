@@ -6,8 +6,34 @@
 
 ### 安装
 
+**本地编译：**
+
 ```bash
 go build -o proxy ./cmd/proxy
+```
+
+**Docker 构建：**
+
+```bash
+# 单架构构建
+docker build -t proxy-gemini-go:latest .
+
+# 多架构构建（AMD64 + ARM64）
+docker buildx build --platform linux/amd64,linux/arm64 -t proxy-gemini-go:latest .
+
+# 推送多架构镜像到仓库
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t your-registry/proxy-gemini-go:latest \
+  --push .
+```
+
+**使用 Makefile：**
+
+```bash
+make build            # 本地编译
+make docker-build     # Docker 构建（当前架构）
+make docker-multiarch # Docker 多架构构建
+make docker-push      # Docker 推送多架构镜像
 ```
 
 ### 配置
@@ -35,8 +61,46 @@ backends:
 
 ### 运行
 
+**本地运行：**
+
 ```bash
 ./proxy -config config.yaml
+```
+
+**Docker 运行：**
+
+```bash
+docker run -d \
+  -p 8080:8080 \
+  -v $(pwd)/config.yaml:/app/config.yaml \
+  --name proxy-gemini-go \
+  proxy-gemini-go:latest
+```
+
+**Docker Compose：**
+
+```yaml
+version: '3.8'
+services:
+  proxy:
+    image: proxy-gemini-go:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.yaml:/app/config.yaml
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+```
+
+**健康检查端点：**
+
+```bash
+curl http://localhost:8080/health
+# 返回：{"status":"healthy","time":"2026-04-15T12:00:00Z"}
 ```
 
 ### 使用示例

@@ -99,6 +99,12 @@ func New(cfg *config.Config, r *router.Router, log *logger.Logger) *Server {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// 健康检查端点
+	if r.URL.Path == "/health" && r.Method == http.MethodGet {
+		s.HealthCheck(w, r)
+		return
+	}
+
 	start := time.Now()
 
 	// 获取 API Key
@@ -269,6 +275,16 @@ func (s *Server) writeError(w http.ResponseWriter, code int, msg string) {
 	json.NewEncoder(w).Encode(types.APIError{
 		Type:    "error",
 		Message: msg,
+	})
+}
+
+// HealthCheck 健康检查端点
+func (s *Server) HealthCheck(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "healthy",
+		"time":   time.Now().UTC().Format(time.RFC3339),
 	})
 }
 

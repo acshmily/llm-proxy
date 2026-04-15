@@ -1,0 +1,14 @@
+.git
+.gitignore
+*.md
+!go.mod
+!go.sum
+.claude/
+docs/
+test/
+*.test
+proxy
+.DS_Store
+*.swp
+*.swo
+*~
