@@ -113,7 +113,35 @@ func TestParseResponse(t *testing.T) {
 		}
 	})
 
-	t.Run("empty response", func(t *testing.T) {
+	t.Run("empty choices array", func(t *testing.T) {
+		// Critical: 测试空 choices 数组不 panic
+		input := `{
+			"id": "chatcmpl-empty",
+			"model": "gpt-4",
+			"choices": [],
+			"usage": {"prompt_tokens": 0, "completion_tokens": 0}
+		}`
+
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("ParseResponse panicked with: %v", r)
+			}
+		}()
+
+		resp, err := ParseResponse([]byte(input))
+		if err != nil {
+			t.Fatalf("ParseResponse failed: %v", err)
+		}
+
+		if len(resp.Content) != 1 {
+			t.Errorf("Expected 1 content block, got %d", len(resp.Content))
+		}
+		if resp.Content[0].Text != "" {
+			t.Errorf("Expected empty content, got '%s'", resp.Content[0].Text)
+		}
+	})
+
+	t.Run("empty message in choice", func(t *testing.T) {
 		input := `{
 			"id": "chatcmpl-empty",
 			"model": "gpt-4",
@@ -131,6 +159,14 @@ func TestParseResponse(t *testing.T) {
 		}
 		if resp.Content[0].Text != "" {
 			t.Errorf("Expected empty content, got '%s'", resp.Content[0].Text)
+		}
+	})
+
+	t.Run("invalid JSON", func(t *testing.T) {
+		// Important: 测试无效 JSON 输入
+		_, err := ParseResponse([]byte(`{invalid json}`))
+		if err == nil {
+			t.Error("Expected error for invalid JSON")
 		}
 	})
 }

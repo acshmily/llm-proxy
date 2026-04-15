@@ -126,6 +126,14 @@ func TestParseResponse(t *testing.T) {
 			t.Errorf("Expected 0 content blocks, got %d", len(resp.Content))
 		}
 	})
+
+	t.Run("invalid JSON", func(t *testing.T) {
+		// Important: 测试无效 JSON 输入
+		_, err := ParseResponse([]byte(`{invalid json}`))
+		if err == nil {
+			t.Error("Expected error for invalid JSON")
+		}
+	})
 }
 
 func TestGeminiRoundTrip(t *testing.T) {

@@ -51,11 +51,17 @@ func ParseResponse(data []byte) (*types.UnifiedResponse, error) {
 		return nil, err
 	}
 
+	// 处理空 choices 数组或缺失 message 的情况
+	var content string
+	if len(resp.Choices) > 0 {
+		content = resp.Choices[0].Message.Content
+	}
+
 	unified := &types.UnifiedResponse{
 		ID:    resp.ID,
 		Model: resp.Model,
 		Content: []types.ContentBlock{
-			{Type: "text", Text: resp.Choices[0].Message.Content},
+			{Type: "text", Text: content},
 		},
 		Role: "assistant",
 		Usage: types.Usage{
