@@ -150,13 +150,14 @@ func (m *ProtectionMiddleware) ApplyBrowserHeaders(req *http.Header) {
 	}
 
 	m.mu.Lock()
-	if !m.IsEnabled() || !m.cfg.TrafficCamouflage.BrowserHeaders.Enabled {
-		m.mu.Unlock()
+	defer m.mu.Unlock()
+
+	// 直接检查配置，避免在持有锁时调用 IsEnabled() 导致死锁
+	if m.cfg == nil || !m.cfg.Enabled || !m.cfg.TrafficCamouflage.BrowserHeaders.Enabled {
 		return
 	}
 
 	headers := m.applyBrowserHeadersLocked(req)
-	m.mu.Unlock()
 
 	req.Set("User-Agent", headers.UserAgent)
 	req.Set("Accept", headers.Accept)
@@ -176,7 +177,8 @@ func (m *ProtectionMiddleware) GetRequestDelay() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if !m.IsEnabled() || !m.cfg.BehaviorJitter.RequestDelay.Enabled {
+	// 直接检查配置，避免在持有锁时调用 IsEnabled() 导致死锁
+	if m.cfg == nil || !m.cfg.Enabled || !m.cfg.BehaviorJitter.RequestDelay.Enabled {
 		return 0
 	}
 
@@ -204,7 +206,8 @@ func (m *ProtectionMiddleware) ShouldReuseConnection() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if !m.IsEnabled() || !m.cfg.BehaviorJitter.ConnectionReuse.Enabled {
+	// 直接检查配置，避免在持有锁时调用 IsEnabled() 导致死锁
+	if m.cfg == nil || !m.cfg.Enabled || !m.cfg.BehaviorJitter.ConnectionReuse.Enabled {
 		return true
 	}
 
@@ -226,7 +229,8 @@ func (m *ProtectionMiddleware) GetPaddingSize() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if !m.IsEnabled() || !m.cfg.BehaviorJitter.RequestPadding.Enabled {
+	// 直接检查配置，避免在持有锁时调用 IsEnabled() 导致死锁
+	if m.cfg == nil || !m.cfg.Enabled || !m.cfg.BehaviorJitter.RequestPadding.Enabled {
 		return 0
 	}
 
@@ -281,7 +285,8 @@ func (m *ProtectionMiddleware) GetBrowserUserAgent() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if !m.IsEnabled() || !m.cfg.TrafficCamouflage.BrowserHeaders.Enabled {
+	// 直接检查配置，避免在持有锁时调用 IsEnabled() 导致死锁
+	if m.cfg == nil || !m.cfg.Enabled || !m.cfg.TrafficCamouflage.BrowserHeaders.Enabled {
 		return ""
 	}
 
