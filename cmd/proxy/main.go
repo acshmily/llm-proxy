@@ -2,12 +2,13 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"os"
 	"log"
-
+	"net/http"
 	"github.com/claude-projetc/proxy-gemini-go/internal/config"
 	"github.com/claude-projetc/proxy-gemini-go/internal/logger"
+	"github.com/claude-projetc/proxy-gemini-go/internal/router"
+	"github.com/claude-projetc/proxy-gemini-go/internal/server"
 )
 
 func main() {
@@ -38,7 +39,13 @@ func main() {
 	log.Info("Starting Anthropic Protocol Proxy",
 		logger.LogField{Key: "listen", Value: cfg.Server.Listen})
 
-	// TODO: Initialize router and start server
-	fmt.Println("Proxy initialized successfully")
-	os.Exit(0)
+	// 初始化路由和服务器
+	r := router.New(cfg.Routes)
+	srv := server.New(cfg, r, log)
+
+	log.Info("Listening", logger.LogField{Key: "address", Value: cfg.Server.Listen})
+	if err := http.ListenAndServe(cfg.Server.Listen, srv); err != nil {
+		log.Error("Server failed", logger.LogField{Key: "error", Value: err.Error()})
+		os.Exit(1)
+	}
 }
