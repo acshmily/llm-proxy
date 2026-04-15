@@ -206,7 +206,7 @@ backends:
 - **防护机制** - 三层防护避免 GFW 和网络行为特征扫描
   - 流量伪装：TLS 指纹模拟、浏览器头部模拟
   - 行为打散：请求延迟、连接复用打散、请求填充
-  - 流量混淆：WebSocket 隧道、请求分片（计划中）
+  - 流量混淆：WebSocket 隧道、请求分片（已实现）
 
 ## 防护机制
 
@@ -269,9 +269,9 @@ protection:
 
 ### 3. 流量混淆（Traffic Obfuscation）
 
-> **注意：** 本层功能目前为**计划中功能**，尚未实现。
+> **状态：** 已实现（v0.2.0+）
 
-**WebSocket 隧道（计划中）：**
+**WebSocket 隧道：**
 ```yaml
 protection:
   traffic_obfuscation:
@@ -281,7 +281,7 @@ protection:
       ping_interval_ms: 30000
 ```
 
-**请求分片（计划中）：**
+**请求分片：**
 ```yaml
 protection:
   traffic_obfuscation:

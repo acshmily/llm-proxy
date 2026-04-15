@@ -173,9 +173,9 @@ protection:
 
 ## 第三层：流量混淆（Traffic Obfuscation）
 
-> **注意：** 本层功能目前为**计划中功能**，尚未实现。配置项存在于代码中，但不产生实际效果。
+> **状态：** 已实现（v0.2.0+）
 
-### WebSocket 隧道（计划中）
+### WebSocket 隧道
 
 **作用：** 将 HTTP 请求封装在 WebSocket 消息中传输，绕过基于 HTTP 特征的检测。
 
@@ -195,9 +195,24 @@ protection:
 3. 服务端从 WebSocket 消息中解包 HTTP 请求
 4. 响应同样通过 WebSocket 消息返回
 
-**注意：** WebSocket 隧道需要客户端配合实现。
+**消息格式：**
+```json
+{
+  "type": "request",
+  "data": {
+    "method": "POST",
+    "path": "/v1/messages",
+    "headers": {"Content-Type": "application/json"},
+    "body": "base64-encoded-body"
+  }
+}
+```
 
-### 请求分片（计划中）
+**注意：** WebSocket 隧道需要客户端配合实现，使用标准 WebSocket API 即可。
+
+### 请求分片
+
+**状态：** 已实现（v0.2.0+）
 
 **作用：** 将大请求分割成多个小片段发送，避免大包特征。
 
@@ -212,8 +227,23 @@ protection:
 
 **工作原理：**
 1. 当请求体超过 max_chunk_size 时自动分片
-2. 每个分片作为独立请求发送
-3. 服务端重组分片后处理
+2. 每个分片使用 Base64 编码
+3. 添加 `X-Request-Sharded: true` 头部标识
+4. 服务端自动重组分片
+
+**分片请求格式：**
+```json
+{
+  "sharded": true,
+  "chunks": ["base64-chunk-1", "base64-chunk-2", "..."],
+  "total": 3
+}
+```
+
+**HTTP 头部标识：**
+- `X-Request-Sharded: true` - 标识为分片请求
+- `X-Chunk-Count: <number>` - 分片数量
+- `Content-Type: application/json` - 分片请求使用 JSON 格式
 
 ## 配置推荐
 
