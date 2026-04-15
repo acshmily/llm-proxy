@@ -1,0 +1,24 @@
+# WebSocket 隧道客户端配置示例
+# 复制此文件为 client-config.yaml 并修改配置
+
+server:
+  # 服务端 WebSocket 地址
+  address: "ws://localhost:8080/ws-tunnel"
+  # 心跳间隔（毫秒）
+  ping_interval_ms: 30000
+
+listen:
+  # 本地 HTTP 代理监听地址
+  address: ":8081"
+
+logging:
+  # 日志格式：json 或 text
+  format: "json"
+  # 日志级别：debug, info, warn, error
+  level: "info"
+
+health:
+  # 是否启用健康检查端点
+  enabled: true
+  # 健康检查端点监听地址
+  address: ":8082"
