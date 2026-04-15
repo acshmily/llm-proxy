@@ -27,11 +27,24 @@ type Server struct {
 }
 
 func New(cfg *config.Config, r *router.Router, log *logger.Logger) *Server {
+	// 配置 HTTP 连接池
+	transport := &http.Transport{
+		MaxIdleConns:        100,              // 最大空闲连接数
+		MaxIdleConnsPerHost: 10,               // 每个主机的最大空闲连接数
+		IdleConnTimeout:     90 * time.Second, // 空闲连接超时时间
+		TLSHandshakeTimeout: 10 * time.Second, // TLS 握手超时
+		ExpectContinueTimeout: 1 * time.Second,
+		ForceAttemptHTTP2:     true,
+	}
+
 	return &Server{
 		cfg:    cfg,
 		router: r,
 		log:    log,
-		client: &http.Client{},
+		client: &http.Client{
+			Transport: transport,
+			Timeout:   120 * time.Second, // 默认请求超时
+		},
 	}
 }
 
