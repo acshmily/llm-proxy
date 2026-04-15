@@ -163,19 +163,20 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	backendReq.Header.Set("Authorization", "Bearer "+route.BackendKey)
 	backendReq.Header.Set("Content-Type", "application/json")
 
-	// 使用 httptrace 追踪连接是否复用
-	var connReused bool
-	connReused = true // 默认假设复用，除非明确触发拨号
-
 	// 执行请求
 	ctx, cancel := context.WithTimeout(r.Context(), route.Timeout)
 	defer cancel()
 
-	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+	// 使用 httptrace 追踪连接是否复用
+	var connReused bool
+	connReused = true // 默认假设复用，除非明确触发拨号
+
+	trace := &httptrace.ClientTrace{
 		GotConn: func(info httptrace.GotConnInfo) {
 			connReused = info.Reused
 		},
-	})
+	}
+	ctx = httptrace.WithClientTrace(ctx, trace)
 
 	resp, err := s.client.Do(backendReq.WithContext(ctx))
 	if err != nil {
@@ -191,16 +192,22 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 处理响应
 	if unified.Stream {
-		s.handleStream(w, resp, route.Backend)
+		s.handleStream(w, resp, route.Backend, connReused)
 	} else {
 		s.handleNonStream(w, resp, route.Backend, latency, start, connReused)
 	}
 }
 
-func (s *Server) handleStream(w http.ResponseWriter, resp *http.Response, backend string) {
+func (s *Server) handleStream(w http.ResponseWriter, resp *http.Response, backend string, connReused bool) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+
+	// 记录连接复用状态
+	s.log.Info("Stream request completed",
+		logger.LogField{Key: "backend", Value: backend},
+		logger.LogField{Key: "conn_reused", Value: connReused},
+	)
 
 	stream.ParseSSE(resp.Body, func(event string, data []byte) {
 		w.Write(data)
