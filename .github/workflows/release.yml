@@ -10,6 +10,7 @@ permissions:
   packages: write
 
 jobs:
+  # 构建 proxy 和 ws-client 二进制文件
   build:
     runs-on: ubuntu-latest
 
@@ -40,7 +41,7 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      - name: Build binary
+      - name: Build proxy binary
         env:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
@@ -52,43 +53,64 @@ jobs:
           fi
           go build -ldflags="-s -w -X main.Version=${VERSION}" -o ${BINARY_NAME} ./cmd/proxy
 
+      - name: Build ws-client binary
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          CLIENT_NAME=ws-client
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            CLIENT_NAME=ws-client.exe
+          fi
+          go build -ldflags="-s -w -X main.Version=${VERSION}" -o ${CLIENT_NAME} ./cmd/ws-client
+
       - name: Create release archive
         run: |
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          ARCHIVE_NAME=llm-proxy-${TAG_NAME}-${{ matrix.os }}-${{ matrix.arch }}
+
+          # 创建目录结构
+          mkdir -p ${ARCHIVE_NAME}
+
+          # 复制 proxy 二进制
           BINARY_NAME=proxy
           if [ "${{ matrix.os }}" = "windows" ]; then
             BINARY_NAME=proxy.exe
           fi
-          TAG_NAME=${GITHUB_REF#refs/tags/}
-          ARCHIVE_NAME=proxy-${TAG_NAME}-${{ matrix.os }}-${{ matrix.arch }}
+          cp ${BINARY_NAME} ${ARCHIVE_NAME}/proxy
 
-          # 创建包含二进制、示例配置和 README 的压缩包
-          mkdir -p ${ARCHIVE_NAME}
-          cp ${BINARY_NAME} ${ARCHIVE_NAME}/
+          # 复制 ws-client 二进制
+          CLIENT_NAME=ws-client
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            CLIENT_NAME=ws-client.exe
+          fi
+          cp ${CLIENT_NAME} ${ARCHIVE_NAME}/ws-client
+
+          # 复制配置文件和文档
           cp config.example.yaml ${ARCHIVE_NAME}/
+          cp configs/client-config.example.yaml ${ARCHIVE_NAME}/ 2>/dev/null || true
           cp README.md ${ARCHIVE_NAME}/
+          cp CHANGELOG.md ${ARCHIVE_NAME}/
           cp LICENSE ${ARCHIVE_NAME}/ 2>/dev/null || true
 
+          # 创建压缩包
           if [ "${{ matrix.os }}" = "windows" ]; then
             zip -r ${ARCHIVE_NAME}.zip ${ARCHIVE_NAME}
+            sha256sum ${ARCHIVE_NAME}.zip > ${ARCHIVE_NAME}.zip.sha256
+            echo "ARTIFACT_NAME=${ARCHIVE_NAME}.zip" >> $GITHUB_ENV
           else
             tar -czvf ${ARCHIVE_NAME}.tar.gz ${ARCHIVE_NAME}
-          fi
-
-          # 计算 SHA256 校验和
-          if [ "${{ matrix.os }}" = "windows" ]; then
-            sha256sum ${ARCHIVE_NAME}.zip > ${ARCHIVE_NAME}.zip.sha256
-          else
             sha256sum ${ARCHIVE_NAME}.tar.gz > ${ARCHIVE_NAME}.tar.gz.sha256
+            echo "ARTIFACT_NAME=${ARCHIVE_NAME}.tar.gz" >> $GITHUB_ENV
           fi
 
-          echo "ARTIFACT_NAME=${ARCHIVE_NAME}" >> $GITHUB_ENV
-
-      - name: Upload release artifact
+      - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARTIFACT_NAME }}
           path: |
-            ${{ env.ARTIFACT_NAME }}.*
+            ${{ env.ARTIFACT_NAME }}*
           retention-days: 1
 
   docker:
@@ -168,25 +190,54 @@ jobs:
           cat > RELEASE_NOTES.md << 'EOF'
           ## LLM Proxy ${{ steps.tag.outputs.TAG_NAME }}
 
-          ### 更新内容
+          ### 🚀 更新内容
+
+          #### 核心功能
           - 多平台二进制文件（Linux, macOS, Windows）
           - 支持 AMD64 和 ARM64 架构
           - Docker 多架构镜像（linux/amd64, linux/arm64）
           - 完整的路由表认证和协议转换
 
-          ### 安装方式
+          #### v0.3.0 新增
+          - **WebSocket 隧道客户端** (ws-client)
+            - 本地 HTTP 代理服务器，无需修改应用代码
+            - 自动重连 + 心跳保持
+            - 健康检查端点
 
-          #### Docker (推荐)
+          ### 📦 安装方式
+
+          #### Docker (推荐 - 服务端)
           ```bash
           docker pull acshmily/llm-proxy:${{ steps.tag.outputs.TAG_NAME }}
+
+          docker run -d \
+            -p 8080:8080 \
+            -v $(pwd)/config.yaml:/app/config.yaml \
+            --name llm-proxy \
+            acshmily/llm-proxy:${{ steps.tag.outputs.TAG_NAME }}
           ```
 
-          #### 二进制文件
+          #### 二进制文件（服务端 + 客户端）
+
           下载对应平台的压缩包，解压后运行：
+
+          **服务端：**
           ```bash
           cp config.example.yaml config.yaml
           # 编辑 config.yaml 填入 API 密钥
           ./proxy -config config.yaml
+          ```
+
+          **WebSocket 隧道客户端（可选）：**
+          ```bash
+          cp configs/client-config.example.yaml client-config.yaml
+          # 编辑 client-config.yaml 填入服务端地址
+          ./ws-client --config client-config.yaml
+          ```
+
+          **或命令行参数：**
+          ```bash
+          ./ws-client --server ws://your-server:8080/ws-tunnel --listen :8081
           ```
 
           #### 校验文件
@@ -195,13 +246,16 @@ jobs:
           sha256sum -c SHA256SUMS
           ```
 
-          ### 支持的后端
+          ### 🔄 支持的后端
           - OpenAI (兼容格式)
           - Anthropic (Claude)
           - Google Gemini
 
-          ### 完整文档
-          查看 [README.md](https://github.com/acshmily/llm-proxy/blob/main/README.md)
+          ### 📚 文档
+          - [README.md](https://github.com/acshmily/llm-proxy/blob/main/README.md) - 主文档
+          - [CONTRIBUTING.md](https://github.com/acshmily/llm-proxy/blob/main/CONTRIBUTING.md) - 贡献指南
+          - [CHANGELOG.md](https://github.com/acshmily/llm-proxy/blob/main/CHANGELOG.md) - 变更日志
+          - [ws-client-guide.md](https://github.com/acshmily/llm-proxy/blob/main/docs/ws-client-guide.md) - 客户端使用指南
           EOF
           cat RELEASE_NOTES.md
 
