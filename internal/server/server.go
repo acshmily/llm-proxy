@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/claude-projetc/proxy-gemini-go/internal/config"
@@ -20,10 +21,43 @@ import (
 )
 
 type Server struct {
-	cfg    *config.Config
-	router *router.Router
-	log    *logger.Logger
-	client *http.Client
+	cfg      *config.Config
+	router   *router.Router
+	log      *logger.Logger
+	client   *http.Client
+	poolStats *PoolStats
+}
+
+// PoolStats 连接池统计
+type PoolStats struct {
+	mu            sync.Mutex
+	idleConns     int
+	requests      int
+	reusedCount   int
+	createCount   int
+}
+
+func (p *PoolStats) RecordRequest(reused bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.requests++
+	if reused {
+		p.reusedCount++
+	} else {
+		p.createCount++
+	}
+}
+
+func (p *PoolStats) GetStats() (int, int, int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.idleConns, p.reusedCount, p.createCount
+}
+
+func (p *PoolStats) SetIdleConns(count int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.idleConns = count
 }
 
 func New(cfg *config.Config, r *router.Router, log *logger.Logger) *Server {
@@ -37,14 +71,29 @@ func New(cfg *config.Config, r *router.Router, log *logger.Logger) *Server {
 		ForceAttemptHTTP2:     true,
 	}
 
+	poolStats := &PoolStats{}
+
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   120 * time.Second, // 默认请求超时
+	}
+
+	// 启动定期统计日志
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			idle, _, _ := poolStats.GetStats()
+			log.LogStats(idle)
+		}
+	}()
+
 	return &Server{
-		cfg:    cfg,
-		router: r,
-		log:    log,
-		client: &http.Client{
-			Transport: transport,
-			Timeout:   120 * time.Second, // 默认请求超时
-		},
+		cfg:       cfg,
+		router:    r,
+		log:       log,
+		client:    client,
+		poolStats: poolStats,
 	}
 }
 
@@ -126,6 +175,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	latency := time.Since(start).Milliseconds()
 
+	// 记录连接复用统计（简化判断：响应速度 < 100ms 可能复用了连接）
+	connReused := latency < 100
+	s.poolStats.RecordRequest(connReused)
+
 	// 处理响应
 	if unified.Stream {
 		s.handleStream(w, resp, route.Backend)
@@ -175,12 +228,16 @@ func (s *Server) handleNonStream(w http.ResponseWriter, resp *http.Response, bac
 	}
 
 	// 记录日志
+	idle, reuse, create := s.poolStats.GetStats()
 	s.log.Info("Request completed",
 		logger.LogField{Key: "latency_ms", Value: latency},
 		logger.LogField{Key: "status_code", Value: resp.StatusCode},
 		logger.LogField{Key: "input_tokens", Value: unified.Usage.InputTokens},
 		logger.LogField{Key: "output_tokens", Value: unified.Usage.OutputTokens},
 		logger.LogField{Key: "backend", Value: backend},
+		logger.LogField{Key: "pool_idle", Value: idle},
+		logger.LogField{Key: "pool_reuse_count", Value: reuse},
+		logger.LogField{Key: "pool_create_count", Value: create},
 	)
 
 	w.Header().Set("Content-Type", "application/json")

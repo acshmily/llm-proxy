@@ -9,13 +9,13 @@ routes:
   # 转发到 OpenAI
   - api_key: "sk-client-1"
     backend: "openai"
-    backend_api_key: "sk-openai-xxx"
+    backend_api_key: "sk-sp-8899a44d120740b3a7ab309addcb5e02"
     timeout: 60s
 
   # 转发到 Anthropic (Claude)
   - api_key: "sk-client-2"
     backend: "anthropic"
-    backend_api_key: "sk-ant-xxx"
+    backend_api_key: "sk-sp-8899a44d120740b3a7ab309addcb5e02"
     timeout: 120s
 
   # 转发到 Gemini
@@ -27,11 +27,11 @@ routes:
 backends:
   # OpenAI 配置
   openai:
-    base_url: "https://api.openai.com/v1"
+    base_url: "https://coding.dashscope.aliyuncs.com/v1"
 
   # Anthropic (Claude) 配置
   anthropic:
-    base_url: "https://api.anthropic.com"
+    base_url: "https://coding.dashscope.aliyuncs.com/apps/anthropic"
 
   # Gemini 配置
   gemini:
