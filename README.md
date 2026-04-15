@@ -38,7 +38,15 @@ make docker-push      # Docker 推送多架构镜像
 
 ### 配置
 
-编辑 `config.yaml`：
+**注意：** `config.yaml` 包含敏感信息，已被 `.gitignore` 排除。
+
+复制示例配置文件：
+
+```bash
+cp config.example.yaml config.yaml
+```
+
+然后编辑 `config.yaml` 填入你的 API 密钥：
 
 ```yaml
 server:
@@ -70,12 +78,19 @@ backends:
 **Docker 运行：**
 
 ```bash
+# 先复制配置文件
+cp config.example.yaml config.yaml
+
+# 编辑配置文件填入 API 密钥
+# 然后运行
 docker run -d \
   -p 8080:8080 \
-  -v $(pwd)/config.yaml:/app/config.yaml \
+  -v $(pwd)/config.yaml:/app/config.yaml:ro \
   --name proxy-gemini-go \
   proxy-gemini-go:latest
 ```
+
+**注意：** 使用 `:ro` 标志只读挂载配置文件，提高安全性。
 
 **Docker Compose：**
 
