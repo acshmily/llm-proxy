@@ -1,0 +1,63 @@
+# 二进制文件
+/proxy
+proxy-*
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+
+# 配置文件（包含敏感信息）
+config.yaml
+config.*.yaml
+*.local.yaml
+
+# 密钥和凭证
+*.pem
+*.key
+*.cert
+.env
+.env.*
+*.env
+secrets/
+credentials/
+
+# 日志文件
+*.log
+logs/
+
+# 临时文件
+*.tmp
+*.bak
+*.swp
+*~
+*.swo
+
+# 编辑器
+.vscode/
+.idea/
+*.iml
+.project
+.settings/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Docker
+docker-compose.override.yaml
+.docker/
+
+# 测试
+coverage.out
+coverage/
+.test/
+go.coverage
+
+# 编译缓存
+go.sum
+pkg/mod/
+pkg/sumdb/
