@@ -1,0 +1,97 @@
+version: '3.8'
+
+# llm-proxy with Nginx 反向代理
+# 用于生产环境部署，提供 TLS 终止、限流、防护功能
+
+services:
+  # ======================
+  # Nginx 反向代理
+  # ======================
+  nginx:
+    image: nginx:alpine
+    container_name: llm-proxy-nginx
+    restart: unless-stopped
+
+    ports:
+      - "80:80"   # HTTP（重定向到 HTTPS）
+      - "443:443" # HTTPS
+
+    volumes:
+      # Nginx 配置
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+
+      # SSL 证书（需要先准备）
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+
+      # 静态文件（伪装用）
+      - ./nginx/html:/var/www/html:ro
+
+      # 日志
+      - ./nginx/logs:/var/log/nginx
+
+    depends_on:
+      - llm-proxy
+
+    networks:
+      - llm-network
+
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ======================
+  # llm-proxy 核心服务
+  # ======================
+  llm-proxy:
+    image: acshmily/llm-proxy:latest
+    container_name: llm-proxy-core
+    restart: unless-stopped
+
+    # 只监听内部网络，不暴露端口
+    expose:
+      - "8080"
+
+    volumes:
+      # 配置文件
+      - ./config.yaml:/app/config.yaml:ro
+
+    environment:
+      - TZ=Asia/Shanghai
+
+    networks:
+      - llm-network
+
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    # 资源限制
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 128M
+
+  # ======================
+  # Optional: Certbot (Let's Encrypt)
+  # ======================
+  # certbot:
+  #   image: certbot/certbot
+  #   volumes:
+  #     - ./nginx/letsencrypt:/etc/letsencrypt
+  #   entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+
+networks:
+  llm-network:
+    driver: bridge

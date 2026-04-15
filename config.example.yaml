@@ -43,3 +43,68 @@ backends:
 retry:
   max_attempts: 3
   retry_errors: [429, 503, 504]
+
+# ======================
+# 防护配置（防止 GFW 和特征扫描）
+# ======================
+protection:
+  # 总开关
+  enabled: true
+
+  # Level 1: 流量伪装
+  traffic_camouflage:
+    # TLS 指纹模拟（需要 utls 库，可选）
+    tls_fingerprint:
+      enabled: false  # Nginx 部署时关闭，独立部署时开启
+      mode: "chrome"  # chrome, firefox, safari, random
+
+    # 浏览器特征头部
+    browser_headers:
+      enabled: true
+      mode: "random"  # random, chrome, firefox, safari
+      # custom_user_agent: "Mozilla/5.0 ..."  # 自定义 UA
+
+    # 内容编码混淆
+    content_encoding:
+      enabled: false
+      algorithms: ["gzip", "deflate", "br"]
+
+  # Level 2: 行为打散
+  behavior_jitter:
+    # 请求延迟抖动
+    request_delay:
+      enabled: true
+      min_ms: 50
+      max_ms: 200
+      distribution: "uniform"  # uniform, exponential
+
+    # 连接复用随机化
+    connection_reuse:
+      enabled: true
+      reuse_rate: 0.8  # 80% 概率复用连接
+
+    # 请求体填充
+    request_padding:
+      enabled: true
+      min_bytes: 0
+      max_bytes: 256
+      mode: "random"  # random, fixed
+      # fixed_size: 128  # 固定填充大小（mode=fixed 时使用）
+
+  # Level 3: 流量混淆（可选，高安全场景）
+  traffic_obfuscation:
+    # WebSocket 隧道
+    websocket_tunnel:
+      enabled: false
+      path: "/ws"
+      ping_interval_ms: 30000
+
+    # 请求分片
+    request_sharding:
+      enabled: false
+      max_chunk_size: 1024
+
+  # 日志配置
+  logging:
+    log_protected_requests: true
+    log_jitter_applied: false  # 避免日志暴露防护信息
