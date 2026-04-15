@@ -72,8 +72,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "openai":
 		backendURL = s.cfg.Backends.OpenAI.BaseURL + "/chat/completions"
 		reqBody, _ = openai.Convert(unified, "gpt-4")
-	case "claude":
-		backendURL = s.cfg.Backends.Claude.BaseURL + "/messages"
+	case "anthropic":
+		backendURL = s.cfg.Backends.Anthropic.BaseURL + "/v1/messages"
 		reqBody, _ = claude.Convert(unified, "claude-3-opus-20240229")
 	case "gemini":
 		backendURL = s.cfg.Backends.Gemini.BaseURL + "/models/gemini-pro:generateContent"
@@ -144,7 +144,7 @@ func (s *Server) handleNonStream(w http.ResponseWriter, resp *http.Response, bac
 	switch backend {
 	case "openai":
 		unified, err = openai.ParseResponse(body)
-	case "claude":
+	case "anthropic":
 		unified, err = claude.ParseResponse(body)
 	case "gemini":
 		unified, err = gemini.ParseResponse(body)

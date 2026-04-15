@@ -33,9 +33,9 @@ type RouteConfig struct {
 }
 
 type BackendsConfig struct {
-	OpenAI BackendConfig `yaml:"openai"`
-	Claude BackendConfig `yaml:"claude"`
-	Gemini BackendConfig `yaml:"gemini"`
+	OpenAI    BackendConfig `yaml:"openai"`
+	Anthropic BackendConfig `yaml:"anthropic"`
+	Gemini    BackendConfig `yaml:"gemini"`
 }
 
 type BackendConfig struct {

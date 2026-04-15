@@ -61,9 +61,47 @@ curl http://localhost:8080/v1/messages \
 
 ## 支持的后端
 
-- **OpenAI** - `/chat/completions` 端点
-- **Claude** - Anthropic 原生 API
-- **Gemini** - Google AI `/generateContent` 端点
+| 后端名称 | 配置值 | API 端点 | 说明 |
+|----------|--------|----------|------|
+| **OpenAI** | `openai` | `/chat/completions` | 兼容 OpenAI 格式的 API |
+| **Anthropic** | `anthropic` | `/v1/messages` | Anthropic 原生 API（Claude 模型） |
+| **Gemini** | `gemini` | `/generateContent` | Google AI Gemini API |
+
+## 路由配置示例
+
+```yaml
+routes:
+  # 转发到 OpenAI
+  - api_key: "sk-client-1"
+    backend: "openai"
+    backend_api_key: "sk-openai-xxx"
+    timeout: 60s
+
+  # 转发到 Anthropic (Claude)
+  - api_key: "sk-client-2"
+    backend: "anthropic"
+    backend_api_key: "sk-ant-xxx"
+    timeout: 120s
+
+  # 转发到 Gemini
+  - api_key: "sk-client-3"
+    backend: "gemini"
+    backend_api_key: "AIzaSyD-xxx"
+    timeout: 90s
+
+backends:
+  # OpenAI 配置
+  openai:
+    base_url: "https://api.openai.com/v1"
+
+  # Anthropic (Claude) 配置
+  anthropic:
+    base_url: "https://api.anthropic.com"
+
+  # Gemini 配置
+  gemini:
+    base_url: "https://generativelanguage.googleapis.com/v1beta"
+```
 
 ## 特性
 
