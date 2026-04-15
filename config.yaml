@@ -1,0 +1,36 @@
+server:
+  listen: :8080
+
+logging:
+  format: json
+  level: info
+
+routes:
+  - api_key: "sk-client-1"
+    backend: "openai"
+    backend_api_key: "sk-openai-xxx"
+    timeout: 60s
+
+  - api_key: "sk-client-2"
+    backend: "claude"
+    backend_api_key: "sk-claude-xxx"
+    timeout: 120s
+
+  - api_key: "sk-client-3"
+    backend: "gemini"
+    backend_api_key: "AIzaSyD-xxx"
+    timeout: 90s
+
+backends:
+  openai:
+    base_url: "https://api.openai.com/v1"
+
+  claude:
+    base_url: "https://api.anthropic.com/v1"
+
+  gemini:
+    base_url: "https://generativelanguage.googleapis.com/v1beta"
+
+retry:
+  max_attempts: 3
+  retry_errors: [429, 503, 504]
