@@ -5,10 +5,10 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [未发布]
+## [0.3.0] - 2026-04-15
 
 ### 新增
-- WebSocket 隧道客户端实现 (#39)
+- WebSocket 隧道客户端实现
   - 本地 HTTP 代理服务器，无需修改应用代码即可通过 WebSocket 隧道通信
   - 单连接架构，维护单一 WebSocket 长连接
   - 指数退避自动重连策略
@@ -19,6 +19,11 @@
   - OpenAI/Gemini/Claude 三个模块的完整测试覆盖
   - 边界情况测试（空数组、无效 JSON 等）
   - Round-trip 往返测试
+- 文档完善
+  - 贡献指南（CONTRIBUTING.md）
+  - 变更日志（CHANGELOG.md）
+  - 代码审查指南（.github/CODE_REVIEW.md）
+  - Pull Request 模板
 
 ### 修复
 - OpenAI `ParseResponse` panic 风险 - 当 `choices` 为空数组时
