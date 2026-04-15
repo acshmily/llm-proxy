@@ -28,68 +28,19 @@ type Logger struct {
 	mu       sync.Mutex
 	level    Level
 	format   Format
-	statsMu  sync.Mutex
-	stats    *PoolStats
-	lastStat time.Time
-}
-
-// PoolStats HTTP 连接池统计
-type PoolStats struct {
-	IdleConns       int `json:"idle_conns"`
-	RequestsTotal   int `json:"requests_total"`
-	ConnReuseCount  int `json:"conn_reuse_count"`
-	ConnCreateCount int `json:"conn_create_count"`
 }
 
 func New(format Format, level Level) *Logger {
-	return &Logger{
-		format: format,
-		level:  level,
-		stats:  &PoolStats{},
-	}
+	return &Logger{format: format, level: level}
 }
 
-// RecordRequest 记录请求统计
-func (l *Logger) RecordRequest(reused bool) {
-	l.statsMu.Lock()
-	defer l.statsMu.Unlock()
-	l.stats.RequestsTotal++
-	if reused {
-		l.stats.ConnReuseCount++
-	} else {
-		l.stats.ConnCreateCount++
-	}
-}
-
-// GetStats 获取连接池统计
-func (l *Logger) GetStats() *PoolStats {
-	l.statsMu.Lock()
-	defer l.statsMu.Unlock()
-	return &PoolStats{
-		RequestsTotal:   l.stats.RequestsTotal,
-		ConnReuseCount:  l.stats.ConnReuseCount,
-		ConnCreateCount: l.stats.ConnCreateCount,
-	}
-}
-
-// LogConnReuse 记录连接复用事件
-func (l *Logger) LogConnReuse(reused bool) {
-	l.RecordRequest(reused)
-}
-
-// LogStats 打印连接池统计（定期调用）
-func (l *Logger) LogStats(idleConns int) {
-	stats := l.GetStats()
-	var reuseRate float64
-	if stats.RequestsTotal > 0 {
-		reuseRate = float64(stats.ConnReuseCount) / float64(stats.RequestsTotal) * 100
-	}
-
+// LogStatsWithDetail 打印详细连接池统计（定期调用）
+func (l *Logger) LogStatsWithDetail(idleConns, requests, reused, created int, reuseRate float64) {
 	l.Info("Connection pool stats",
 		LogField{Key: "idle_conns", Value: idleConns},
-		LogField{Key: "requests_total", Value: stats.RequestsTotal},
-		LogField{Key: "conn_reuse_count", Value: stats.ConnReuseCount},
-		LogField{Key: "conn_create_count", Value: stats.ConnCreateCount},
+		LogField{Key: "requests_total", Value: requests},
+		LogField{Key: "conn_reuse_count", Value: reused},
+		LogField{Key: "conn_create_count", Value: created},
 		LogField{Key: "reuse_rate_percent", Value: fmt.Sprintf("%.1f", reuseRate)},
 	)
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"sync"
 	"time"
 
@@ -21,17 +22,17 @@ import (
 )
 
 type Server struct {
-	cfg      *config.Config
-	router   *router.Router
-	log      *logger.Logger
-	client   *http.Client
+	cfg       *config.Config
+	router    *router.Router
+	log       *logger.Logger
+	client    *http.Client
+	transport *http.Transport
 	poolStats *PoolStats
 }
 
 // PoolStats 连接池统计
 type PoolStats struct {
 	mu            sync.Mutex
-	idleConns     int
 	requests      int
 	reusedCount   int
 	createCount   int
@@ -51,13 +52,7 @@ func (p *PoolStats) RecordRequest(reused bool) {
 func (p *PoolStats) GetStats() (int, int, int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.idleConns, p.reusedCount, p.createCount
-}
-
-func (p *PoolStats) SetIdleConns(count int) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.idleConns = count
+	return p.requests, p.reusedCount, p.createCount
 }
 
 func New(cfg *config.Config, r *router.Router, log *logger.Logger) *Server {
@@ -83,8 +78,13 @@ func New(cfg *config.Config, r *router.Router, log *logger.Logger) *Server {
 		ticker := time.NewTicker(60 * time.Second)
 		defer ticker.Stop()
 		for range ticker.C {
-			idle, _, _ := poolStats.GetStats()
-			log.LogStats(idle)
+			// http.Transport 没有导出的 IdleConnCount 方法，用 -1 表示未知
+			requests, reused, created := poolStats.GetStats()
+			var reuseRate float64
+			if requests > 0 {
+				reuseRate = float64(reused) / float64(requests) * 100
+			}
+			log.LogStatsWithDetail(-1, requests, reused, created, reuseRate)
 		}
 	}()
 
@@ -93,6 +93,7 @@ func New(cfg *config.Config, r *router.Router, log *logger.Logger) *Server {
 		router:    r,
 		log:       log,
 		client:    client,
+		transport: transport,
 		poolStats: poolStats,
 	}
 }
@@ -162,9 +163,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	backendReq.Header.Set("Authorization", "Bearer "+route.BackendKey)
 	backendReq.Header.Set("Content-Type", "application/json")
 
+	// 使用 httptrace 追踪连接是否复用
+	var connReused bool
+	connReused = true // 默认假设复用，除非明确触发拨号
+
 	// 执行请求
 	ctx, cancel := context.WithTimeout(r.Context(), route.Timeout)
 	defer cancel()
+
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		GotConn: func(info httptrace.GotConnInfo) {
+			connReused = info.Reused
+		},
+	})
 
 	resp, err := s.client.Do(backendReq.WithContext(ctx))
 	if err != nil {
@@ -175,15 +186,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	latency := time.Since(start).Milliseconds()
 
-	// 记录连接复用统计（简化判断：响应速度 < 100ms 可能复用了连接）
-	connReused := latency < 100
+	// 记录连接复用统计
 	s.poolStats.RecordRequest(connReused)
 
 	// 处理响应
 	if unified.Stream {
 		s.handleStream(w, resp, route.Backend)
 	} else {
-		s.handleNonStream(w, resp, route.Backend, latency, start)
+		s.handleNonStream(w, resp, route.Backend, latency, start, connReused)
 	}
 }
 
@@ -201,7 +211,7 @@ func (s *Server) handleStream(w http.ResponseWriter, resp *http.Response, backen
 	})
 }
 
-func (s *Server) handleNonStream(w http.ResponseWriter, resp *http.Response, backend string, latency int64, start time.Time) {
+func (s *Server) handleNonStream(w http.ResponseWriter, resp *http.Response, backend string, latency int64, start time.Time, connReused bool) {
 	body, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
@@ -228,16 +238,17 @@ func (s *Server) handleNonStream(w http.ResponseWriter, resp *http.Response, bac
 	}
 
 	// 记录日志
-	idle, reuse, create := s.poolStats.GetStats()
+	requests, reused, created := s.poolStats.GetStats()
 	s.log.Info("Request completed",
 		logger.LogField{Key: "latency_ms", Value: latency},
 		logger.LogField{Key: "status_code", Value: resp.StatusCode},
 		logger.LogField{Key: "input_tokens", Value: unified.Usage.InputTokens},
 		logger.LogField{Key: "output_tokens", Value: unified.Usage.OutputTokens},
 		logger.LogField{Key: "backend", Value: backend},
-		logger.LogField{Key: "pool_idle", Value: idle},
-		logger.LogField{Key: "pool_reuse_count", Value: reuse},
-		logger.LogField{Key: "pool_create_count", Value: create},
+		logger.LogField{Key: "conn_reused", Value: connReused},
+		logger.LogField{Key: "pool_requests", Value: requests},
+		logger.LogField{Key: "pool_reused", Value: reused},
+		logger.LogField{Key: "pool_created", Value: created},
 	)
 
 	w.Header().Set("Content-Type", "application/json")
