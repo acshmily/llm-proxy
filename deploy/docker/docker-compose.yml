@@ -8,7 +8,7 @@ services:
   # Nginx 反向代理
   # ======================
   nginx:
-    image: nginx:alpine
+    image: nginx:1.25-alpine
     container_name: llm-proxy-nginx
     restart: unless-stopped
 
@@ -36,12 +36,24 @@ services:
     networks:
       - llm-network
 
-    # 健康检查
+    # 健康检查（检查 HTTP 端点）
     healthcheck:
-      test: ["CMD", "nginx", "-t"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 10s
+
+    # 日志轮转配置
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # 资源限制（Docker Compose v2.1+ 格式）
+    cpus: 2.0
+    memory: 512M
 
   # ======================
   # llm-proxy 核心服务
@@ -73,15 +85,16 @@ services:
       retries: 3
       start_period: 10s
 
-    # 资源限制
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 512M
-        reservations:
-          cpus: '0.5'
-          memory: 128M
+    # 日志轮转配置
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    # 资源限制（Docker Compose v2.1+ 格式）
+    cpus: 2.0
+    memory: 512M
 
   # ======================
   # Optional: Certbot (Let's Encrypt)
