@@ -17,16 +17,21 @@ jobs:
     strategy:
       matrix:
         include:
+          # Linux - AMD64 + ARM64
           - os: linux
             arch: amd64
           - os: linux
             arch: arm64
+          # macOS - AMD64 + ARM64 (Apple Silicon)
           - os: darwin
             arch: amd64
           - os: darwin
             arch: arm64
+          # Windows - AMD64 + ARM64
           - os: windows
             arch: amd64
+          - os: windows
+            arch: arm64
 
     steps:
       - name: Checkout code
@@ -235,10 +240,19 @@ jobs:
           ./ws-client --config client-config.yaml
           ```
 
-          **或命令行参数：**
+          **命令行参数：**
           ```bash
+          # Linux/macOS
           ./ws-client --server ws://your-server:8080/ws-tunnel --listen :8081
+
+          # Windows
+          ws-client.exe --server ws://your-server:8080/ws-tunnel --listen :8081
           ```
+
+          **支持的平台：**
+          - Linux (AMD64, ARM64)
+          - macOS (AMD64, ARM64)
+          - Windows (AMD64, ARM64)
 
           #### 校验文件
           使用 `SHA256SUMS` 文件验证下载完整性：
