@@ -13,6 +13,7 @@ dist/
 config.yaml
 config.*.yaml
 *.local.yaml
+!config.example.yaml
 
 # 密钥和凭证
 *.pem

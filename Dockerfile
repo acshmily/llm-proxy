@@ -56,8 +56,8 @@ WORKDIR /app
 # 从构建阶段复制二进制文件
 COPY --from=builder /build/proxy .
 
-# 复制默认配置文件
-COPY config.yaml .
+# 复制示例配置文件（实际使用时挂载外部 config.yaml）
+COPY config.example.yaml /app/config.example.yaml
 
 # 设置文件权限
 RUN chown -R proxy:proxy /app && \
@@ -73,6 +73,6 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD wget -q --spider http://localhost:8080/health || exit 1
 
-# 启动命令
+# 启动命令（默认使用 config.yaml，需外部挂载）
 ENTRYPOINT ["./proxy"]
 CMD ["-config", "config.yaml"]
