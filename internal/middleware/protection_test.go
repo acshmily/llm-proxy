@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/claude-projetc/llm-proxy/internal/config"
@@ -378,6 +379,314 @@ func TestProtectionMiddleware_GetBrowserUserAgent(t *testing.T) {
 		// Assert
 		if ua != customUA {
 			t.Errorf("expected %s, got %s", customUA, ua)
+		}
+	})
+}
+
+func TestProtectionMiddleware_GeneratePaddingString(t *testing.T) {
+	t.Run("returns empty string for size 0", func(t *testing.T) {
+		middleware := NewProtectionMiddleware(&config.ProtectionConfig{})
+
+		result := middleware.GeneratePaddingString(0)
+
+		if result != "" {
+			t.Errorf("expected empty string, got %s", result)
+		}
+	})
+
+	t.Run("returns non-empty string for positive size", func(t *testing.T) {
+		middleware := NewProtectionMiddleware(&config.ProtectionConfig{})
+
+		result := middleware.GeneratePaddingString(100)
+
+		if result == "" {
+			t.Error("expected non-empty string, got empty")
+		}
+	})
+
+	t.Run("generates different strings each time", func(t *testing.T) {
+		middleware := NewProtectionMiddleware(&config.ProtectionConfig{})
+
+		s1 := middleware.GeneratePaddingString(50)
+		s2 := middleware.GeneratePaddingString(50)
+
+		if s1 == s2 {
+			t.Error("expected different strings, got same")
+		}
+	})
+}
+
+func TestProtectionMiddleware_GetConfig(t *testing.T) {
+	t.Run("returns nil when cfg is nil", func(t *testing.T) {
+		middleware := NewProtectionMiddleware(nil)
+
+		result := middleware.GetConfig()
+
+		if result != nil {
+			t.Errorf("expected nil, got %v", result)
+		}
+	})
+
+	t.Run("returns config copy when cfg is set", func(t *testing.T) {
+		cfg := &config.ProtectionConfig{
+			Enabled: true,
+		}
+		middleware := NewProtectionMiddleware(cfg)
+
+		result := middleware.GetConfig()
+
+		if result == nil {
+			t.Error("expected config, got nil")
+		}
+		if result.Enabled != true {
+			t.Errorf("expected Enabled=true, got %v", result.Enabled)
+		}
+	})
+
+	t.Run("returns independent copy", func(t *testing.T) {
+		cfg := &config.ProtectionConfig{
+			Enabled: true,
+		}
+		middleware := NewProtectionMiddleware(cfg)
+
+		result := middleware.GetConfig()
+
+		// Modify original config
+		cfg.Enabled = false
+
+		// Returned config should be independent
+		if result.Enabled != true {
+			t.Error("expected independent copy, changes to original affected returned config")
+		}
+	})
+}
+
+func TestProtectionMiddleware_ApplyBrowserHeaders_Modes(t *testing.T) {
+	t.Run("applies Firefox headers when mode is firefox", func(t *testing.T) {
+		cfg := &config.ProtectionConfig{
+			Enabled: true,
+			TrafficCamouflage: config.TrafficCamouflageConfig{
+				BrowserHeaders: config.BrowserHeadersConfig{
+					Enabled: true,
+					Mode:    config.BrowserModeFirefox,
+				},
+			},
+		}
+		middleware := NewProtectionMiddleware(cfg)
+		headers := make(http.Header)
+
+		middleware.ApplyBrowserHeaders(&headers)
+
+		ua := headers.Get("User-Agent")
+		if ua == "" {
+			t.Error("expected User-Agent to be set")
+		}
+		if !strings.Contains(ua, "Firefox") {
+			t.Errorf("expected Firefox in UA, got %s", ua)
+		}
+	})
+
+	t.Run("applies Safari headers when mode is safari", func(t *testing.T) {
+		cfg := &config.ProtectionConfig{
+			Enabled: true,
+			TrafficCamouflage: config.TrafficCamouflageConfig{
+				BrowserHeaders: config.BrowserHeadersConfig{
+					Enabled: true,
+					Mode:    config.BrowserModeSafari,
+				},
+			},
+		}
+		middleware := NewProtectionMiddleware(cfg)
+		headers := make(http.Header)
+
+		middleware.ApplyBrowserHeaders(&headers)
+
+		ua := headers.Get("User-Agent")
+		if ua == "" {
+			t.Error("expected User-Agent to be set")
+		}
+		if !strings.Contains(ua, "Safari") {
+			t.Errorf("expected Safari in UA, got %s", ua)
+		}
+	})
+
+	t.Run("randomly selects browser when mode is random", func(t *testing.T) {
+		cfg := &config.ProtectionConfig{
+			Enabled: true,
+			TrafficCamouflage: config.TrafficCamouflageConfig{
+				BrowserHeaders: config.BrowserHeadersConfig{
+					Enabled: true,
+					Mode:    config.BrowserModeRandom,
+				},
+			},
+		}
+		middleware := NewProtectionMiddleware(cfg)
+
+		// Run multiple times to verify random selection works
+		browsers := make(map[string]int)
+		for i := 0; i < 30; i++ {
+			headers := make(http.Header)
+			middleware.ApplyBrowserHeaders(&headers)
+			ua := headers.Get("User-Agent")
+			if strings.Contains(ua, "Chrome") {
+				browsers["Chrome"]++
+			} else if strings.Contains(ua, "Firefox") {
+				browsers["Firefox"]++
+			} else if strings.Contains(ua, "Safari") && !strings.Contains(ua, "Chrome") {
+				browsers["Safari"]++
+			}
+		}
+
+		// Should have seen at least 2 different browsers
+		if len(browsers) < 2 {
+			t.Errorf("expected random selection, only saw %d browser type(s): %v", len(browsers), browsers)
+		}
+	})
+
+	t.Run("falls back to Chrome for invalid mode", func(t *testing.T) {
+		cfg := &config.ProtectionConfig{
+			Enabled: true,
+			TrafficCamouflage: config.TrafficCamouflageConfig{
+				BrowserHeaders: config.BrowserHeadersConfig{
+					Enabled: true,
+					Mode:    "invalid-mode",
+				},
+			},
+		}
+		middleware := NewProtectionMiddleware(cfg)
+		headers := make(http.Header)
+
+		middleware.ApplyBrowserHeaders(&headers)
+
+		ua := headers.Get("User-Agent")
+		if ua == "" {
+			t.Error("expected User-Agent to be set")
+		}
+		// Should fall back to Chrome
+		if !strings.Contains(ua, "Chrome") {
+			t.Errorf("expected Chrome fallback, got %s", ua)
+		}
+	})
+}
+
+func TestProtectionMiddleware_GetBrowserUserAgent_Modes(t *testing.T) {
+	t.Run("returns Chrome UA when mode is chrome", func(t *testing.T) {
+		cfg := &config.ProtectionConfig{
+			Enabled: true,
+			TrafficCamouflage: config.TrafficCamouflageConfig{
+				BrowserHeaders: config.BrowserHeadersConfig{
+					Enabled: true,
+					Mode:    config.BrowserModeChrome,
+				},
+			},
+		}
+		middleware := NewProtectionMiddleware(cfg)
+
+		ua := middleware.GetBrowserUserAgent()
+
+		if ua == "" {
+			t.Error("expected non-empty UA")
+		}
+		if !strings.Contains(ua, "Chrome") {
+			t.Errorf("expected Chrome in UA, got %s", ua)
+		}
+	})
+
+	t.Run("returns Firefox UA when mode is firefox", func(t *testing.T) {
+		cfg := &config.ProtectionConfig{
+			Enabled: true,
+			TrafficCamouflage: config.TrafficCamouflageConfig{
+				BrowserHeaders: config.BrowserHeadersConfig{
+					Enabled: true,
+					Mode:    config.BrowserModeFirefox,
+				},
+			},
+		}
+		middleware := NewProtectionMiddleware(cfg)
+
+		ua := middleware.GetBrowserUserAgent()
+
+		if ua == "" {
+			t.Error("expected non-empty UA")
+		}
+		if !strings.Contains(ua, "Firefox") {
+			t.Errorf("expected Firefox in UA, got %s", ua)
+		}
+	})
+
+	t.Run("returns Safari UA when mode is safari", func(t *testing.T) {
+		cfg := &config.ProtectionConfig{
+			Enabled: true,
+			TrafficCamouflage: config.TrafficCamouflageConfig{
+				BrowserHeaders: config.BrowserHeadersConfig{
+					Enabled: true,
+					Mode:    config.BrowserModeSafari,
+				},
+			},
+		}
+		middleware := NewProtectionMiddleware(cfg)
+
+		ua := middleware.GetBrowserUserAgent()
+
+		if ua == "" {
+			t.Error("expected non-empty UA")
+		}
+		if !strings.Contains(ua, "Safari") {
+			t.Errorf("expected Safari in UA, got %s", ua)
+		}
+	})
+
+	t.Run("randomly selects UA when mode is random", func(t *testing.T) {
+		cfg := &config.ProtectionConfig{
+			Enabled: true,
+			TrafficCamouflage: config.TrafficCamouflageConfig{
+				BrowserHeaders: config.BrowserHeadersConfig{
+					Enabled: true,
+					Mode:    config.BrowserModeRandom,
+				},
+			},
+		}
+		middleware := NewProtectionMiddleware(cfg)
+
+		// Run multiple times to verify random selection
+		browsers := make(map[string]int)
+		for i := 0; i < 30; i++ {
+			ua := middleware.GetBrowserUserAgent()
+			if strings.Contains(ua, "Chrome") && !strings.Contains(ua, "Firefox") && !strings.Contains(ua, "Safari/605") {
+				browsers["Chrome"]++
+			} else if strings.Contains(ua, "Firefox") {
+				browsers["Firefox"]++
+			} else if strings.Contains(ua, "Safari") && !strings.Contains(ua, "Chrome") {
+				browsers["Safari"]++
+			}
+		}
+
+		// Should have seen at least 2 different browsers
+		if len(browsers) < 2 {
+			t.Errorf("expected random selection, only saw %d browser type(s): %v", len(browsers), browsers)
+		}
+	})
+
+	t.Run("falls back to Chrome for invalid mode", func(t *testing.T) {
+		cfg := &config.ProtectionConfig{
+			Enabled: true,
+			TrafficCamouflage: config.TrafficCamouflageConfig{
+				BrowserHeaders: config.BrowserHeadersConfig{
+					Enabled: true,
+					Mode:    "invalid-mode",
+				},
+			},
+		}
+		middleware := NewProtectionMiddleware(cfg)
+
+		ua := middleware.GetBrowserUserAgent()
+
+		if ua == "" {
+			t.Error("expected non-empty UA")
+		}
+		// Should fall back to Chrome
+		if !strings.Contains(ua, "Chrome") {
+			t.Errorf("expected Chrome fallback, got %s", ua)
 		}
 	})
 }
