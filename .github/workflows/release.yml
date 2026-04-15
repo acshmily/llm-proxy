@@ -1,0 +1,186 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+          - os: linux
+            arch: arm64
+          - os: darwin
+            arch: amd64
+          - os: darwin
+            arch: arm64
+          - os: windows
+            arch: amd64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+          cache: true
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+        run: |
+          BINARY_NAME=proxy
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            BINARY_NAME=proxy.exe
+          fi
+          go build -ldflags="-s -w" -o ${BINARY_NAME} ./cmd/proxy
+
+      - name: Create release archive
+        run: |
+          BINARY_NAME=proxy
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            BINARY_NAME=proxy.exe
+          fi
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          ARCHIVE_NAME=proxy-${TAG_NAME}-${{ matrix.os }}-${{ matrix.arch }}
+
+          # 创建包含二进制、示例配置和 README 的压缩包
+          mkdir -p ${ARCHIVE_NAME}
+          cp ${BINARY_NAME} ${ARCHIVE_NAME}/
+          cp config.example.yaml ${ARCHIVE_NAME}/
+          cp README.md ${ARCHIVE_NAME}/
+
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            zip -r ${ARCHIVE_NAME}.zip ${ARCHIVE_NAME}
+          else
+            tar -czvf ${ARCHIVE_NAME}.tar.gz ${ARCHIVE_NAME}
+          fi
+
+          echo "ARTIFACT_NAME=${ARCHIVE_NAME}" >> $GITHUB_ENV
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.ARTIFACT_NAME }}.*
+          retention-days: 1
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Extract tag name
+        id: tag
+        run: echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build and push multi-arch image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            acshmily/llm-proxy:${{ steps.tag.outputs.TAG_NAME }}
+            acshmily/llm-proxy:latest
+          cache-from: type=registry,ref=acshmily/llm-proxy:buildcache
+          cache-to: type=registry,ref=acshmily/llm-proxy:buildcache,mode=max
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [build, docker]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract tag name
+        id: tag
+        run: echo "TAG_NAME=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: List artifacts
+        run: ls -la ./artifacts
+
+      - name: Create release notes
+        run: |
+          cat > RELEASE_NOTES.md << 'EOF'
+          ## LLM Proxy ${{ steps.tag.outputs.TAG_NAME }}
+
+          ### 更新内容
+          - 多平台二进制文件（Linux, macOS, Windows）
+          - 支持 AMD64 和 ARM64 架构
+          - Docker 多架构镜像（linux/amd64, linux/arm64）
+          - 完整的路由表认证和协议转换
+
+          ### 安装方式
+
+          #### Docker (推荐)
+          ```bash
+          docker pull acshmily/llm-proxy:${{ steps.tag.outputs.TAG_NAME }}
+          ```
+
+          #### 二进制文件
+          下载对应平台的压缩包，解压后运行：
+          ```bash
+          cp config.example.yaml config.yaml
+          # 编辑 config.yaml 填入 API 密钥
+          ./proxy -config config.yaml
+          ```
+
+          ### 支持的后端
+          - OpenAI (兼容格式)
+          - Anthropic (Claude)
+          - Google Gemini
+
+          ### 完整文档
+          查看 [README.md](https://github.com/acshmily/llm-proxy/blob/main/README.md)
+          EOF
+          cat RELEASE_NOTES.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ steps.tag.outputs.TAG_NAME }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            ./artifacts/**/*.tar.gz
+            ./artifacts/**/*.zip
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: false
