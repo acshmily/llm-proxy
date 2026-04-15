@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/claude-projetc/proxy-gemini-go/internal/config"
+	"github.com/claude-projetc/llm-proxy/internal/config"
 )
 
 type Route struct {

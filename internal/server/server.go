@@ -10,15 +10,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/claude-projetc/proxy-gemini-go/internal/config"
-	"github.com/claude-projetc/proxy-gemini-go/internal/logger"
-	"github.com/claude-projetc/proxy-gemini-go/internal/protocol/anthropic"
-	"github.com/claude-projetc/proxy-gemini-go/internal/protocol/openai"
-	"github.com/claude-projetc/proxy-gemini-go/internal/protocol/claude"
-	"github.com/claude-projetc/proxy-gemini-go/internal/protocol/gemini"
-	"github.com/claude-projetc/proxy-gemini-go/internal/router"
-	"github.com/claude-projetc/proxy-gemini-go/internal/stream"
-	"github.com/claude-projetc/proxy-gemini-go/pkg/types"
+	"github.com/claude-projetc/llm-proxy/internal/config"
+	"github.com/claude-projetc/llm-proxy/internal/logger"
+	"github.com/claude-projetc/llm-proxy/internal/protocol/anthropic"
+	"github.com/claude-projetc/llm-proxy/internal/protocol/openai"
+	"github.com/claude-projetc/llm-proxy/internal/protocol/claude"
+	"github.com/claude-projetc/llm-proxy/internal/protocol/gemini"
+	"github.com/claude-projetc/llm-proxy/internal/router"
+	"github.com/claude-projetc/llm-proxy/internal/stream"
+	"github.com/claude-projetc/llm-proxy/pkg/types"
 )
 
 type Server struct {

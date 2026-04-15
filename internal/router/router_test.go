@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/claude-projetc/proxy-gemini-go/internal/config"
+	"github.com/claude-projetc/llm-proxy/internal/config"
 )
 
 func TestRouter_FindRoute(t *testing.T) {

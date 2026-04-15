@@ -16,14 +16,14 @@ go build -o proxy ./cmd/proxy
 
 ```bash
 # 单架构构建
-docker build -t proxy-gemini-go:latest .
+docker build -t llm-proxy:latest .
 
 # 多架构构建（AMD64 + ARM64）
-docker buildx build --platform linux/amd64,linux/arm64 -t proxy-gemini-go:latest .
+docker buildx build --platform linux/amd64,linux/arm64 -t llm-proxy:latest .
 
 # 推送多架构镜像到仓库
 docker buildx build --platform linux/amd64,linux/arm64 \
-  -t your-registry/proxy-gemini-go:latest \
+  -t your-registry/llm-proxy:latest \
   --push .
 ```
 
@@ -86,8 +86,8 @@ cp config.example.yaml config.yaml
 docker run -d \
   -p 8080:8080 \
   -v $(pwd)/config.yaml:/app/config.yaml:ro \
-  --name proxy-gemini-go \
-  proxy-gemini-go:latest
+  --name llm-proxy \
+  llm-proxy:latest
 ```
 
 **注意：** 使用 `:ro` 标志只读挂载配置文件，提高安全性。
@@ -98,7 +98,7 @@ docker run -d \
 version: '3.8'
 services:
   proxy:
-    image: proxy-gemini-go:latest
+    image: llm-proxy:latest
     ports:
       - "8080:8080"
     volumes:

@@ -1,6 +1,6 @@
 # 多阶段构建 - 支持多架构编译
 # 使用 docker buildx 构建：
-#   docker buildx build --platform linux/amd64,linux/arm64 -t proxy-gemini-go:latest .
+#   docker buildx build --platform linux/amd64,linux/arm64 -t llm-proxy:latest .
 
 # ========== 构建阶段 ==========
 FROM golang:1.21-alpine AS builder

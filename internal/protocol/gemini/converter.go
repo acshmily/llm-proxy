@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/claude-projetc/proxy-gemini-go/pkg/types"
+	"github.com/claude-projetc/llm-proxy/pkg/types"
 )
 
 // Convert 统一格式 -> Gemini 格式

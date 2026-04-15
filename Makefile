@@ -2,7 +2,7 @@
 
 # 二进制名称
 BINARY_NAME=proxy
-IMAGE_NAME=proxy-gemini-go
+IMAGE_NAME=llm-proxy
 IMAGE_TAG=latest
 
 # 本地编译

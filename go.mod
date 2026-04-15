@@ -1,4 +1,4 @@
-module github.com/claude-projetc/proxy-gemini-go
+module github.com/claude-projetc/llm-proxy
 
 go 1.21
 

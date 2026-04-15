@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/claude-projetc/proxy-gemini-go/internal/config"
-	"github.com/claude-projetc/proxy-gemini-go/internal/logger"
-	"github.com/claude-projetc/proxy-gemini-go/internal/router"
-	"github.com/claude-projetc/proxy-gemini-go/internal/server"
-	"github.com/claude-projetc/proxy-gemini-go/test/mock"
+	"github.com/claude-projetc/llm-proxy/internal/config"
+	"github.com/claude-projetc/llm-proxy/internal/logger"
+	"github.com/claude-projetc/llm-proxy/internal/router"
+	"github.com/claude-projetc/llm-proxy/internal/server"
+	"github.com/claude-projetc/llm-proxy/test/mock"
 )
 
 func TestProxyEndToEnd(t *testing.T) {

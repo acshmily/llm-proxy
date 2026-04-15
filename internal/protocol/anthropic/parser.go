@@ -2,7 +2,7 @@ package anthropic
 
 import (
 	"encoding/json"
-	"github.com/claude-projetc/proxy-gemini-go/pkg/types"
+	"github.com/claude-projetc/llm-proxy/pkg/types"
 )
 
 // Request Anthropic API 请求
