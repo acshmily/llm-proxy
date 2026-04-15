@@ -68,16 +68,22 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var backendURL string
 	var reqBody []byte
 
+	// 使用客户端请求中的 model，如果没有则使用默认值
+	model := unified.Model
+	if model == "" {
+		model = getDefaultModel(route.Backend)
+	}
+
 	switch route.Backend {
 	case "openai":
 		backendURL = s.cfg.Backends.OpenAI.BaseURL + "/chat/completions"
-		reqBody, _ = openai.Convert(unified, "gpt-4")
+		reqBody, _ = openai.Convert(unified, model)
 	case "anthropic":
 		backendURL = s.cfg.Backends.Anthropic.BaseURL + "/v1/messages"
-		reqBody, _ = claude.Convert(unified, "claude-3-opus-20240229")
+		reqBody, _ = claude.Convert(unified, model)
 	case "gemini":
-		backendURL = s.cfg.Backends.Gemini.BaseURL + "/models/gemini-pro:generateContent"
-		reqBody, _ = gemini.Convert(unified, "")
+		backendURL = s.cfg.Backends.Gemini.BaseURL + "/models/" + model + ":generateContent"
+		reqBody, _ = gemini.Convert(unified, model)
 	default:
 		s.writeError(w, http.StatusBadRequest, "Unknown backend")
 		return
@@ -183,4 +189,17 @@ func extractBearerToken(auth string) string {
 		return auth[7:]
 	}
 	return ""
+}
+
+func getDefaultModel(backend string) string {
+	switch backend {
+	case "openai":
+		return "gpt-4"
+	case "anthropic":
+		return "claude-3-opus-20240229"
+	case "gemini":
+		return "gemini-pro"
+	default:
+		return ""
+	}
 }
