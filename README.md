@@ -2,6 +2,16 @@
 
 将 Anthropic API 协议转写为多种后端协议（OpenAI、Claude、Gemini）的网络代理。
 
+[![Go](https://github.com/acshmily/llm-proxy/actions/workflows/go.yml/badge.svg)](https://github.com/acshmily/llm-proxy/actions/workflows/go.yml)
+[![Docker Pulls](https://img.shields.io/docker/pulls/acshmily/llm-proxy)](https://hub.docker.com/repository/docker/acshmily/llm-proxy/)
+[![Docker Image Size](https://img.shields.io/docker/image-size/acshmily/llm-proxy/latest)](https://hub.docker.com/repository/docker/acshmily/llm-proxy/)
+
+**Docker 镜像：** [`acshmily/llm-proxy`](https://hub.docker.com/repository/docker/acshmily/llm-proxy/)
+
+```bash
+docker pull acshmily/llm-proxy:latest
+```
+
 ## 快速开始
 
 ### 安装
@@ -78,6 +88,9 @@ backends:
 **Docker 运行：**
 
 ```bash
+# 从 Docker Hub 拉取镜像
+docker pull acshmily/llm-proxy:latest
+
 # 先复制配置文件
 cp config.example.yaml config.yaml
 
@@ -87,7 +100,7 @@ docker run -d \
   -p 8080:8080 \
   -v $(pwd)/config.yaml:/app/config.yaml:ro \
   --name llm-proxy \
-  llm-proxy:latest
+  acshmily/llm-proxy:latest
 ```
 
 **注意：** 使用 `:ro` 标志只读挂载配置文件，提高安全性。
@@ -98,7 +111,7 @@ docker run -d \
 version: '3.8'
 services:
   proxy:
-    image: llm-proxy:latest
+    image: acshmily/llm-proxy:latest
     ports:
       - "8080:8080"
     volumes:
