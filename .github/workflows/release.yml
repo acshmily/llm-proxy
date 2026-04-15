@@ -44,12 +44,13 @@ jobs:
         env:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
+          VERSION: ${{ github.ref_name }}
         run: |
           BINARY_NAME=proxy
           if [ "${{ matrix.os }}" = "windows" ]; then
             BINARY_NAME=proxy.exe
           fi
-          go build -ldflags="-s -w" -o ${BINARY_NAME} ./cmd/proxy
+          go build -ldflags="-s -w -X main.Version=${VERSION}" -o ${BINARY_NAME} ./cmd/proxy
 
       - name: Create release archive
         run: |
@@ -65,11 +66,19 @@ jobs:
           cp ${BINARY_NAME} ${ARCHIVE_NAME}/
           cp config.example.yaml ${ARCHIVE_NAME}/
           cp README.md ${ARCHIVE_NAME}/
+          cp LICENSE ${ARCHIVE_NAME}/ 2>/dev/null || true
 
           if [ "${{ matrix.os }}" = "windows" ]; then
             zip -r ${ARCHIVE_NAME}.zip ${ARCHIVE_NAME}
           else
             tar -czvf ${ARCHIVE_NAME}.tar.gz ${ARCHIVE_NAME}
+          fi
+
+          # 计算 SHA256 校验和
+          if [ "${{ matrix.os }}" = "windows" ]; then
+            sha256sum ${ARCHIVE_NAME}.zip > ${ARCHIVE_NAME}.zip.sha256
+          else
+            sha256sum ${ARCHIVE_NAME}.tar.gz > ${ARCHIVE_NAME}.tar.gz.sha256
           fi
 
           echo "ARTIFACT_NAME=${ARCHIVE_NAME}" >> $GITHUB_ENV
@@ -78,7 +87,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: ${{ env.ARTIFACT_NAME }}.*
+          path: |
+            ${{ env.ARTIFACT_NAME }}.*
           retention-days: 1
 
   docker:
@@ -133,9 +143,25 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: ./artifacts
+          pattern: "*"
+          merge-multiple: true
 
       - name: List artifacts
-        run: ls -la ./artifacts
+        run: |
+          echo "=== Downloaded Artifacts ==="
+          find ./artifacts -type f | sort
+
+      - name: Create SHA256 checksums file
+        run: |
+          cd ./artifacts
+          echo "=== SHA256 Checksums ===" > SHA256SUMS
+          for f in *.tar.gz *.zip; do
+            if [ -f "$f" ]; then
+              cat "${f}.sha256" >> SHA256SUMS
+              echo "" >> SHA256SUMS
+            fi
+          done
+          cat SHA256SUMS
 
       - name: Create release notes
         run: |
@@ -163,6 +189,12 @@ jobs:
           ./proxy -config config.yaml
           ```
 
+          #### 校验文件
+          使用 `SHA256SUMS` 文件验证下载完整性：
+          ```bash
+          sha256sum -c SHA256SUMS
+          ```
+
           ### 支持的后端
           - OpenAI (兼容格式)
           - Anthropic (Claude)
@@ -179,8 +211,9 @@ jobs:
           name: Release ${{ steps.tag.outputs.TAG_NAME }}
           body_path: RELEASE_NOTES.md
           files: |
-            ./artifacts/**/*.tar.gz
-            ./artifacts/**/*.zip
+            ./artifacts/*.tar.gz
+            ./artifacts/*.zip
+            ./artifacts/SHA256SUMS
           draft: false
           prerelease: false
           fail_on_unmatched_files: false

@@ -28,10 +28,35 @@
 - `acshmily/llm-proxy:v0.1.0` - 版本标签
 - `acshmily/llm-proxy:latest` - 最新稳定版
 
+### 其他文件
+- `SHA256SUMS` - 所有压缩包的 SHA256 校验和
+
 每个 Release 包含：
-- 对应平台的二进制文件
+- 对应平台的二进制文件（带版本信息）
 - `config.example.yaml` 配置示例
 - `README.md` 使用文档
+- `LICENSE` 许可证文件（如有）
+
+### 校验和验证
+
+下载后验证文件完整性：
+
+```bash
+# Linux/macOS
+sha256sum -c SHA256SUMS
+
+# Windows (PowerShell)
+Get-FileHash proxy-v0.1.0-windows-amd64.zip -Algorithm SHA256
+```
+
+### 版本信息
+
+二进制文件内置版本信息：
+
+```bash
+./proxy -version
+# 输出：llm-proxy v0.1.0
+```
 
 ## 语义化版本
 

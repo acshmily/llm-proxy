@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"log"
 	"net/http"
@@ -11,9 +12,18 @@ import (
 	"github.com/claude-projetc/llm-proxy/internal/server"
 )
 
+// Version 版本号，由编译时注入
+var Version = "dev"
+
 func main() {
+	version := flag.Bool("version", false, "print version and exit")
 	configPath := flag.String("config", "config.yaml", "path to config file")
 	flag.Parse()
+
+	if *version {
+		fmt.Printf("llm-proxy %s\n", Version)
+		os.Exit(0)
+	}
 
 	cfg, err := config.LoadConfig(*configPath)
 	if err != nil {
@@ -36,7 +46,8 @@ func main() {
 	}
 
 	log := logger.New(logFormat, logLevel)
-	log.Info("Starting Anthropic Protocol Proxy",
+	log.Info("Starting LLM Proxy",
+		logger.LogField{Key: "version", Value: Version},
 		logger.LogField{Key: "listen", Value: cfg.Server.Listen})
 
 	// 初始化路由和服务器
