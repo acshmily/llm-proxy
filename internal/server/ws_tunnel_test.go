@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -188,6 +189,11 @@ func TestWSTunnelMiddleware_processWebSocketMessage(t *testing.T) {
 func TestWSTunnelMiddleware_handleHTTPRequest(t *testing.T) {
 	t.Run("handles valid HTTP request", func(t *testing.T) {
 		middleware := NewWSTunnelMiddleware(&config.WebSocketTunnelConfig{Enabled: true}, nil)
+		// 配置模拟的请求处理器
+		middleware.SetRequestHandler(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"message": "ok"}`))
+		})
 
 		envelope := map[string]interface{}{
 			"type": "request",
@@ -270,6 +276,12 @@ func TestWSTunnelMiddleware_handleHTTPRequest(t *testing.T) {
 	t.Run("decodes base64 body correctly", func(t *testing.T) {
 		obfus := middleware.NewTrafficObfuscationMiddleware(&config.TrafficObfuscationConfig{})
 		middleware := NewWSTunnelMiddleware(&config.WebSocketTunnelConfig{Enabled: true}, obfus)
+		// 配置模拟的请求处理器
+		middleware.SetRequestHandler(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			w.WriteHeader(http.StatusOK)
+			w.Write(body)
+		})
 
 		bodyBytes := []byte(`{"message": "hello"}`)
 		bodyB64 := base64.StdEncoding.EncodeToString(bodyBytes)
@@ -312,6 +324,13 @@ func TestWSTunnelMiddleware_Integration(t *testing.T) {
 			Enabled: true,
 			Path:    "/ws-tunnel",
 		}, obfus)
+
+		// 配置模拟的请求处理器
+		wsMiddleware.SetRequestHandler(func(w http.ResponseWriter, r *http.Request) {
+			body, _ := io.ReadAll(r.Body)
+			w.WriteHeader(http.StatusOK)
+			w.Write(body)
+		})
 
 		// Create a sharded request
 		body := []byte(`{"test": "data"}`)

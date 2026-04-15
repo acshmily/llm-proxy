@@ -12,6 +12,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 
@@ -21,10 +22,11 @@ import (
 
 // WSTunnelMiddleware WebSocket 隧道中间件
 type WSTunnelMiddleware struct {
-	cfg       *config.WebSocketTunnelConfig
-	obfus     *middleware.TrafficObfuscationMiddleware
-	mu        sync.Mutex
-	connections sync.Map // map[string]net.Conn
+	cfg           *config.WebSocketTunnelConfig
+	obfus         *middleware.TrafficObfuscationMiddleware
+	mu            sync.Mutex
+	connections   sync.Map // map[string]net.Conn
+	requestHandler http.HandlerFunc
 }
 
 // NewWSTunnelMiddleware 创建 WebSocket 隧道中间件
@@ -33,6 +35,13 @@ func NewWSTunnelMiddleware(cfg *config.WebSocketTunnelConfig, obfus *middleware.
 		cfg:   cfg,
 		obfus: obfus,
 	}
+}
+
+// SetRequestHandler 设置请求处理回调
+func (m *WSTunnelMiddleware) SetRequestHandler(handler http.HandlerFunc) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.requestHandler = handler
 }
 
 // IsEnabled 检查 WebSocket 隧道是否启用
@@ -185,7 +194,7 @@ func (m *WSTunnelMiddleware) handleHTTPRequest(envelope map[string]interface{}) 
 		}
 	}
 
-	// 创建 HTTP 请求
+	// 创建 HTTP 请求（使用 httptest.ResponseRecorder 模拟请求）
 	req, err := http.NewRequest(method, path, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return json.Marshal(map[string]string{"type": "error", "message": err.Error()})
@@ -198,14 +207,35 @@ func (m *WSTunnelMiddleware) handleHTTPRequest(envelope map[string]interface{}) 
 		}
 	}
 
-	// 这里应该将请求转发到后端，但为了简化，我们只返回一个响应
-	// 实际使用中需要集成到主服务器的路由逻辑
+	// 使用 ResponseRecorder 捕获响应
+	rec := httptest.NewRecorder()
+
+	// 调用服务器的 ServeHTTP（需要外部传入 server 实例）
+	// 由于循环依赖，这里我们通过回调方式处理
+	if m.requestHandler != nil {
+		m.requestHandler(rec, req)
+	} else {
+		return json.Marshal(map[string]string{"type": "error", "message": "request handler not configured"})
+	}
+
+	// 构建响应
+	resp := rec.Result()
+	bodyBytes, err = io.ReadAll(resp.Body)
+	if err != nil {
+		return json.Marshal(map[string]string{"type": "error", "message": "failed to read response body"})
+	}
+
+	headers := make(map[string]string)
+	for key := range resp.Header {
+		headers[key] = resp.Header.Get(key)
+	}
+
 	return json.Marshal(map[string]interface{}{
 		"type": "response",
 		"data": map[string]interface{}{
-			"status":  200,
-			"headers": map[string]string{"Content-Type": "application/json"},
-			"body":    base64.StdEncoding.EncodeToString([]byte(`{"message": "WebSocket tunnel OK"}`)),
+			"status":  resp.StatusCode,
+			"headers": headers,
+			"body":    base64.StdEncoding.EncodeToString(bodyBytes),
 		},
 	})
 }

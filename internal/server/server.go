@@ -12,6 +12,7 @@ import (
 
 	"github.com/claude-projetc/llm-proxy/internal/config"
 	"github.com/claude-projetc/llm-proxy/internal/logger"
+	"github.com/claude-projetc/llm-proxy/internal/middleware"
 	"github.com/claude-projetc/llm-proxy/internal/protocol/anthropic"
 	"github.com/claude-projetc/llm-proxy/internal/protocol/openai"
 	"github.com/claude-projetc/llm-proxy/internal/protocol/claude"
@@ -28,6 +29,7 @@ type Server struct {
 	client    *http.Client
 	transport *http.Transport
 	poolStats *PoolStats
+	wsTunnel  *WSTunnelMiddleware
 }
 
 // PoolStats 连接池统计
@@ -73,6 +75,14 @@ func New(cfg *config.Config, r *router.Router, log *logger.Logger) *Server {
 		Timeout:   120 * time.Second, // 默认请求超时
 	}
 
+	// 创建 WebSocket 隧道中间件（先创建对象，但不设置回调）
+	var wsTunnel *WSTunnelMiddleware
+	var obfusMiddleware *middleware.TrafficObfuscationMiddleware
+	if cfg.Protection.TrafficObfuscation.WebSocketTunnel.Enabled {
+		obfusMiddleware = middleware.NewTrafficObfuscationMiddleware(&cfg.Protection.TrafficObfuscation)
+		wsTunnel = NewWSTunnelMiddleware(&cfg.Protection.TrafficObfuscation.WebSocketTunnel, obfusMiddleware)
+	}
+
 	// 启动定期统计日志
 	go func() {
 		ticker := time.NewTicker(60 * time.Second)
@@ -88,22 +98,42 @@ func New(cfg *config.Config, r *router.Router, log *logger.Logger) *Server {
 		}
 	}()
 
-	return &Server{
+	s := &Server{
 		cfg:       cfg,
 		router:    r,
 		log:       log,
 		client:    client,
 		transport: transport,
 		poolStats: poolStats,
+		wsTunnel:  wsTunnel,
 	}
+
+	// 配置 WebSocket 隧道的请求处理回调（在 s 创建之后）
+	if wsTunnel != nil {
+		wsTunnel.SetRequestHandler(s.serveRequest)
+	}
+
+	return s
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// WebSocket 隧道端点
+	if s.wsTunnel != nil && r.URL.Path == s.wsTunnel.GetPath() {
+		s.wsTunnel.WSTunnelHandler()(w, r)
+		return
+	}
+
 	// 健康检查端点
 	if r.URL.Path == "/health" && r.Method == http.MethodGet {
 		s.HealthCheck(w, r)
 		return
 	}
+
+	s.serveRequest(w, r)
+}
+
+// serveRequest 处理实际请求（供 WebSocket 隧道调用）
+func (s *Server) serveRequest(w http.ResponseWriter, r *http.Request) {
 
 	start := time.Now()
 

@@ -93,13 +93,14 @@ protection:
 
   # Level 3: 流量混淆（可选，高安全场景）
   traffic_obfuscation:
-    # WebSocket 隧道
+    # WebSocket 隧道 - 将 HTTP 请求封装在 WebSocket 消息中
+    # 客户端实现参考：docs/ws-tunnel-client-guide.md
     websocket_tunnel:
-      enabled: false
-      path: "/ws"
+      enabled: false  # 启用后，客户端可通过 WebSocket 连接发送 HTTP 请求
+      path: "/ws-tunnel"
       ping_interval_ms: 30000
 
-    # 请求分片
+    # 请求分片 - 将大请求分割成多个小片段
     request_sharding:
       enabled: false
       max_chunk_size: 1024
