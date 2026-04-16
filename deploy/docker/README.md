@@ -70,6 +70,21 @@ curl https://your-domain.com/health
 
 ---
 
+## 其他部署方式
+
+### Linux systemd 服务
+
+将 llm-proxy 安装为系统服务（无需 Docker）：
+
+**一键安装：**
+```bash
+curl -fsSL https://raw.githubusercontent.com/acshmily/llm-proxy/main/deploy/linux/install.sh | sudo bash
+```
+
+详细文档：[../linux/README.md](../linux/README.md)
+
+---
+
 ## 手动部署（systemd）
 
 ### 1. 安装依赖

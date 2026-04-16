@@ -335,6 +335,37 @@ protection:
       enabled: false
 ```
 
+## Linux 系统服务部署
+
+将 LLM Proxy 安装为 systemd 服务，实现后台运行、开机自启、日志管理。
+
+**一键安装：**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/acshmily/llm-proxy/main/deploy/linux/install.sh | sudo bash
+```
+
+**服务管理：**
+
+```bash
+sudo systemctl start llm-proxy      # 启动
+sudo systemctl stop llm-proxy       # 停止
+sudo systemctl restart llm-proxy    # 重启
+sudo systemctl status llm-proxy     # 状态
+sudo systemctl enable llm-proxy     # 开机自启
+```
+
+**日志查看：**
+
+```bash
+sudo journalctl -u llm-proxy -f     # 实时日志
+sudo journalctl -u llm-proxy -n 100 # 最近 100 行
+```
+
+详细文档：[deploy/linux/README.md](deploy/linux/README.md)
+
+---
+
 ## Nginx 反向代理部署
 
 生产环境建议使用 Nginx 作为反向代理，提供 TLS 终止、限流、防护功能。
