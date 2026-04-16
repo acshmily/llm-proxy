@@ -171,3 +171,63 @@ func TestServer_OpenAIRequest_WrongMethod(t *testing.T) {
 
 	assert.Equal(t, http.StatusNotFound, rr.Code)
 }
+
+func TestServer_OpenAIRequest_ToGeminiBackend(t *testing.T) {
+	// 测试 OpenAI 请求转发到 Gemini 后端
+	mockBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 验证 Gemini API 调用
+		assert.Contains(t, r.URL.Path, ":generateContent")
+		assert.Contains(t, r.URL.RawQuery, "key=") // Gemini 使用 URL 参数传递 API Key
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{
+			"candidates": [{
+				"content": {
+					"parts": [{"text": "Hello from Gemini!"}]
+				},
+				"finishReason": "STOP"
+			}],
+			"usageMetadata": {
+				"promptTokenCount": 10,
+				"candidatesTokenCount": 5
+			}
+		}`))
+	}))
+	defer mockBackend.Close()
+
+	cfg := &config.Config{
+		Routes: []config.RouteConfig{{
+			APIKey:      "sk-test-key",
+			Backend:     "gemini",
+			BackendKey:  "gemini-test-key",
+			Timeout:     30000000000,
+		}},
+		Backends: config.BackendsConfig{
+			Gemini: config.BackendConfig{BaseURL: mockBackend.URL},
+		},
+	}
+
+	r := router.New(cfg.Routes)
+	log := logger.New(logger.TEXT, logger.INFO)
+	srv := New(cfg, r, log)
+
+	reqBody := []byte(`{"model": "gemini-pro", "messages": [{"role": "user", "content": "Hi"}]}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(reqBody))
+	req.Header.Set("Authorization", "Bearer sk-test-key")
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	// 验证响应为 OpenAI 格式
+	var resp map[string]interface{}
+	json.Unmarshal(rr.Body.Bytes(), &resp)
+	assert.Contains(t, resp, "choices")
+	assert.Contains(t, resp, "usage")
+
+	// 验证 finish_reason 映射
+	choices := resp["choices"].([]interface{})
+	choice := choices[0].(map[string]interface{})
+	assert.Equal(t, "stop", choice["finish_reason"])
+}
