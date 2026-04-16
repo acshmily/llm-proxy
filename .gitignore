@@ -62,3 +62,7 @@ go.coverage
 go.sum
 pkg/mod/
 pkg/sumdb/
+
+# Worktrees（隔离工作区）
+.worktrees/
+worktrees/
