@@ -22,6 +22,8 @@ routes:
     timeout: 120s
 
   # 转发到 Gemini
+  # 注意：Gemini API Key 格式为 AIzaSyD-xxx，无需 Bearer 前缀
+  # 获取方式：https://makersuite.google.com/app/apikey
   - api_key: "sk-client-3"
     backend: "gemini"
     backend_api_key: "AIzaSyD-your-gemini-key-here"
