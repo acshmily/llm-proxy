@@ -183,6 +183,8 @@ func (s *Server) serveRequest(w http.ResponseWriter, r *http.Request) {
 	case "gemini":
 		backendURL = s.cfg.Backends.Gemini.BaseURL + "/models/" + model + ":generateContent"
 		reqBody, _ = gemini.Convert(unified, model)
+		// Gemini 使用 URL 参数 key= 而非 Bearer Token
+		backendURL = backendURL + "?key=" + route.BackendKey
 	default:
 		s.writeError(w, http.StatusBadRequest, "Unknown backend")
 		return
@@ -195,8 +197,10 @@ func (s *Server) serveRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 设置后端认证
-	backendReq.Header.Set("Authorization", "Bearer "+route.BackendKey)
+	// 设置后端认证（Gemini 不需要 Authorization header）
+	if route.Backend != "gemini" {
+		backendReq.Header.Set("Authorization", "Bearer "+route.BackendKey)
+	}
 	backendReq.Header.Set("Content-Type", "application/json")
 
 	// 执行请求
