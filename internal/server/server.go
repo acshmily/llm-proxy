@@ -129,7 +129,19 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.serveRequest(w, r)
+	// 根据路径路由到不同协议处理器
+	switch {
+	case r.URL.Path == "/v1/chat/completions" && r.Method == http.MethodPost:
+		s.serveOpenAIRequest(w, r)
+		return
+	case r.URL.Path == "/v1/messages" && r.Method == http.MethodPost:
+		// 现有 Anthropic 端点
+		s.serveRequest(w, r)
+		return
+	default:
+		s.writeError(w, http.StatusNotFound, "Endpoint not found")
+		return
+	}
 }
 
 // serveRequest 处理实际请求（供 WebSocket 隧道调用）
@@ -238,6 +250,108 @@ func (s *Server) serveRequest(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// serveOpenAIRequest 处理 OpenAI 协议请求
+func (s *Server) serveOpenAIRequest(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+
+	// 获取 API Key
+	apiKey := r.Header.Get("x-api-key")
+	if apiKey == "" {
+		apiKey = extractBearerToken(r.Header.Get("Authorization"))
+	}
+
+	route, found := s.router.FindRoute(apiKey)
+	if !found {
+		s.writeError(w, http.StatusUnauthorized, "Invalid API key")
+		return
+	}
+
+	// 读取请求体
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, "Failed to read request body")
+		return
+	}
+
+	// 解析 OpenAI 请求
+	unified, err := openai.ParseRequest(body)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, "Invalid request format")
+		return
+	}
+
+	// 选择后端转换器
+	var backendURL string
+	var reqBody []byte
+
+	model := unified.Model
+	if model == "" {
+		model = getDefaultModel(route.Backend)
+	}
+
+	switch route.Backend {
+	case "openai":
+		backendURL = s.cfg.Backends.OpenAI.BaseURL + "/chat/completions"
+		reqBody, _ = openai.Convert(unified, model)
+	case "anthropic":
+		backendURL = s.cfg.Backends.Anthropic.BaseURL + "/v1/messages"
+		reqBody, _ = claude.Convert(unified, model)
+	case "gemini":
+		backendURL = s.cfg.Backends.Gemini.BaseURL + "/models/" + model + ":generateContent"
+		reqBody, _ = gemini.Convert(unified, model)
+		backendURL = backendURL + "?key=" + route.BackendKey
+	default:
+		s.writeError(w, http.StatusBadRequest, "Unknown backend")
+		return
+	}
+
+	// 创建后端请求
+	backendReq, err := http.NewRequest(r.Method, backendURL, bytes.NewReader(reqBody))
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "Failed to create backend request")
+		return
+	}
+
+	// 设置后端认证（Gemini 不需要 Authorization header）
+	if route.Backend != "gemini" {
+		backendReq.Header.Set("Authorization", "Bearer "+route.BackendKey)
+	}
+	backendReq.Header.Set("Content-Type", "application/json")
+
+	// 执行请求
+	ctx, cancel := context.WithTimeout(r.Context(), route.Timeout)
+	defer cancel()
+
+	var connReused bool
+	connReused = true
+
+	trace := &httptrace.ClientTrace{
+		GotConn: func(info httptrace.GotConnInfo) {
+			connReused = info.Reused
+		},
+	}
+	ctx = httptrace.WithClientTrace(ctx, trace)
+
+	resp, err := s.client.Do(backendReq.WithContext(ctx))
+	if err != nil {
+		s.writeError(w, http.StatusBadGateway, "Backend request failed")
+		return
+	}
+	defer resp.Body.Close()
+
+	latency := time.Since(start).Milliseconds()
+
+	// 记录连接复用统计
+	s.poolStats.RecordRequest(connReused)
+
+	// 处理响应
+	if unified.Stream {
+		s.handleOpenAIStream(w, resp, route.Backend, connReused)
+	} else {
+		s.handleOpenAINonStream(w, resp, route.Backend, latency, start, connReused)
+	}
+}
+
 func (s *Server) handleStream(w http.ResponseWriter, resp *http.Response, backend string, connReused bool) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -303,6 +417,76 @@ func (s *Server) handleNonStream(w http.ResponseWriter, resp *http.Response, bac
 	json.NewEncoder(w).Encode(unified)
 }
 
+// handleOpenAINonStream 处理 OpenAI 非流式响应
+func (s *Server) handleOpenAINonStream(w http.ResponseWriter, resp *http.Response, backend string, latency int64, start time.Time, connReused bool) {
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		// 转换后端错误为 OpenAI 格式
+		s.writeOpenAIError(w, resp.StatusCode, convertBackendError(backend, body))
+		return
+	}
+
+	// 转换响应为统一格式
+	var unified *types.UnifiedResponse
+	var err error
+
+	switch backend {
+	case "openai":
+		unified, err = openai.ParseResponse(body)
+	case "anthropic":
+		unified, err = claude.ParseResponse(body)
+	case "gemini":
+		unified, err = gemini.ParseResponse(body)
+	}
+
+	if err != nil {
+		s.writeOpenAIError(w, http.StatusInternalServerError, "Failed to parse response")
+		return
+	}
+
+	// 构建 OpenAI 格式响应
+	respBody, err := openai.BuildResponse(unified)
+	if err != nil {
+		s.writeOpenAIError(w, http.StatusInternalServerError, "Failed to build response")
+		return
+	}
+
+	// 记录日志
+	s.log.Info("OpenAI request completed",
+		logger.LogField{Key: "latency_ms", Value: latency},
+		logger.LogField{Key: "status_code", Value: resp.StatusCode},
+		logger.LogField{Key: "backend", Value: backend},
+		logger.LogField{Key: "conn_reused", Value: connReused},
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(respBody)
+}
+
+// handleOpenAIStream 处理 OpenAI 流式响应
+func (s *Server) handleOpenAIStream(w http.ResponseWriter, resp *http.Response, backend string, connReused bool) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	// 记录连接复用状态
+	s.log.Info("OpenAI stream request completed",
+		logger.LogField{Key: "backend", Value: backend},
+		logger.LogField{Key: "conn_reused", Value: connReused},
+	)
+
+	// 流式解析并转发
+	stream.ParseSSE(resp.Body, func(event string, data []byte) {
+		w.Write(data)
+		w.Write([]byte("\n\n"))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	})
+}
+
 func (s *Server) writeError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
@@ -310,6 +494,46 @@ func (s *Server) writeError(w http.ResponseWriter, code int, msg string) {
 		Type:    "error",
 		Message: msg,
 	})
+}
+
+// writeOpenAIError 写入 OpenAI 格式错误
+func (s *Server) writeOpenAIError(w http.ResponseWriter, code int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+
+	type OpenAIError struct {
+		Error struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+			Code    string `json:"code,omitempty"`
+		} `json:"error"`
+	}
+
+	err := OpenAIError{}
+	err.Error.Message = message
+	err.Error.Type = errorCodeMap[code]
+	err.Error.Code = errorCodeMap[code]
+
+	json.NewEncoder(w).Encode(err)
+}
+
+// errorCodeMap HTTP 状态码到错误类型映射
+var errorCodeMap = map[int]string{
+	400: "invalid_request_error",
+	401: "authentication_error",
+	403: "permission_error",
+	404: "not_found_error",
+	429: "rate_limit_error",
+	500: "internal_server_error",
+	502: "service_unavailable_error",
+	503: "service_unavailable_error",
+}
+
+// convertBackendError 转换后端错误为 OpenAI 格式
+func convertBackendError(backend string, body []byte) string {
+	// 简单实现：直接返回后端错误消息
+	// 可以进一步解析并格式化
+	return string(body)
 }
 
 // HealthCheck 健康检查端点
