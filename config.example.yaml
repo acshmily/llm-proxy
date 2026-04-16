@@ -111,3 +111,19 @@ protection:
   logging:
     log_protected_requests: true
     log_jitter_applied: false  # 避免日志暴露防护信息
+
+# ======================
+# 协议说明
+# ======================
+# 服务端同时支持两种协议入口：
+# - Anthropic 协议：POST /v1/messages
+# - OpenAI 协议：POST /v1/chat/completions
+#
+# 两种入口可以混合使用，客户端可根据 SDK 选择协议：
+# - 使用 Anthropic SDK 时调用 /v1/messages
+# - 使用 OpenAI SDK 时调用 /v1/chat/completions
+#
+# 模型名直接透传到后端，无需映射配置。
+# 例如：客户端发送 "claude-3-opus" -> 后端接收 "claude-3-opus"
+#
+# 路由配置无需修改，同一个 API Key 可以同時用于两种协议。

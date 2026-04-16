@@ -137,6 +137,25 @@ curl http://localhost:8080/health
 
 ### 使用示例
 
+两种协议入口可以混合使用，根据客户端 SDK 选择协议：
+
+## 支持的端点
+
+| 端点 | 描述 |
+|------|------|
+| `POST /v1/messages` | 聊天完成（Anthropic 协议，支持流式） |
+| `POST /v1/chat/completions` | 聊天完成（OpenAI 协议，支持流式） |
+| `GET /v1/models` | 获取模型列表 |
+| `POST /v1/messages/count_tokens` | Token 计数 |
+
+## 协议支持
+
+本代理支持两种协议入口，可混合使用：
+
+### Anthropic 协议 (`/v1/messages`)
+
+使用 Anthropic SDK 调用：
+
 ```bash
 curl http://localhost:8080/v1/messages \
   -H "Authorization: Bearer sk-client-1" \
@@ -147,13 +166,47 @@ curl http://localhost:8080/v1/messages \
   }'
 ```
 
-## 支持的端点
+### OpenAI 协议 (`/v1/chat/completions`)
 
-| 端点 | 描述 |
-|------|------|
-| `POST /v1/messages` | 聊天完成（支持流式） |
-| `GET /v1/models` | 获取模型列表 |
-| `POST /v1/messages/count_tokens` | Token 计数 |
+使用 OpenAI SDK 或任意 OpenAI 兼容客户端调用：
+
+**Python OpenAI SDK 示例：**
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8080",
+    api_key="sk-client-1"  # 配置的客户端 API Key
+)
+
+response = client.chat.completions.create(
+    model="claude-3-opus",  # 模型名透传到后端
+    messages=[
+        {"role": "user", "content": "Hello!"}
+    ]
+)
+print(response.choices[0].message.content)
+```
+
+**curl 调用示例：**
+
+```bash
+curl http://localhost:8080/v1/chat/completions \
+  -H "Authorization: Bearer sk-client-1" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-3-opus",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
+**协议路由说明：**
+
+- 使用 Anthropic SDK 时调用 `/v1/messages` 端点
+- 使用 OpenAI SDK 时调用 `/v1/chat/completions` 端点
+- 两种协议可以混合使用，路由配置无需修改
+- 模型名直接透传到后端，无需映射配置
 
 ## 支持的后端
 
