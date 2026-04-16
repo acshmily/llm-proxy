@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+	"time"
 	"github.com/claude-projetc/llm-proxy/pkg/types"
 )
 
@@ -83,11 +84,52 @@ type OpenAIResponse struct {
 
 // Choice OpenAI 响应选择
 type Choice struct {
-	Message ChatMessage `json:"message"`
+	Index        int         `json:"index"`
+	Message      ChatMessage `json:"message"`
+	FinishReason string      `json:"finish_reason"`
 }
 
 // Usage OpenAI 使用量统计
 type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
+}
+
+// ChatCompletionResponse OpenAI Chat Completion 响应
+type ChatCompletionResponse struct {
+	ID      string   `json:"id"`
+	Object  string   `json:"object"`
+	Created int64    `json:"created"`
+	Model   string   `json:"model"`
+	Choices []Choice `json:"choices"`
+	Usage   Usage    `json:"usage"`
+}
+
+// BuildResponse 将统一响应转换为 OpenAI 格式
+func BuildResponse(unified *types.UnifiedResponse) ([]byte, error) {
+	var content string
+	if len(unified.Content) > 0 {
+		content = unified.Content[0].Text
+	}
+
+	resp := ChatCompletionResponse{
+		ID:      unified.ID,
+		Object:  "chat.completion",
+		Created: time.Now().Unix(),
+		Model:   unified.Model,
+		Choices: []Choice{{
+			Index: 0,
+			Message: ChatMessage{
+				Role:    "assistant",
+				Content: content,
+			},
+			FinishReason: "stop",
+		}},
+		Usage: Usage{
+			PromptTokens:     unified.Usage.InputTokens,
+			CompletionTokens: unified.Usage.OutputTokens,
+		},
+	}
+
+	return json.Marshal(resp)
 }

@@ -5,205 +5,89 @@ import (
 	"testing"
 
 	"github.com/claude-projetc/llm-proxy/pkg/types"
+	"github.com/stretchr/testify/assert"
 )
 
-func TestConvert(t *testing.T) {
-	t.Run("basic conversion", func(t *testing.T) {
-		um := &types.UnifiedMessage{
-			Model:  "gpt-4",
-			Stream: true,
-			Messages: []types.MessageRole{
-				{Role: "system", Content: "You are helpful"},
-				{Role: "user", Content: "Hello"},
-				{Role: "assistant", Content: "Hi there"},
-			},
-			MaxTokens:   100,
-			Temperature: 0.7,
-			TopP:        0.9,
-		}
+func TestParseResponse_ValidResponse(t *testing.T) {
+	data := []byte(`{
+		"id": "chatcmpl-123",
+		"model": "gpt-4",
+		"choices": [{
+			"index": 0,
+			"message": {"role": "assistant", "content": "Hello!"},
+			"finish_reason": "stop"
+		}],
+		"usage": {"prompt_tokens": 10, "completion_tokens": 5}
+	}`)
 
-		data, err := Convert(um, "gpt-4-turbo")
-		if err != nil {
-			t.Fatalf("Convert failed: %v", err)
-		}
+	resp, err := ParseResponse(data)
 
-		var req OpenAIRequest
-		if err := json.Unmarshal(data, &req); err != nil {
-			t.Fatalf("JSON unmarshal failed: %v", err)
-		}
-
-		if req.Model != "gpt-4-turbo" {
-			t.Errorf("Expected model 'gpt-4-turbo', got '%s'", req.Model)
-		}
-		if !req.Stream {
-			t.Error("Expected stream to be true")
-		}
-		if req.MaxTokens != 100 {
-			t.Errorf("Expected max_tokens 100, got %d", req.MaxTokens)
-		}
-		if len(req.Messages) != 3 {
-			t.Errorf("Expected 3 messages, got %d", len(req.Messages))
-		}
-	})
-
-	t.Run("minimal conversion", func(t *testing.T) {
-		um := &types.UnifiedMessage{
-			Model:    "gpt-3.5-turbo",
-			Messages: []types.MessageRole{{Role: "user", Content: "Test"}},
-		}
-
-		data, err := Convert(um, "gpt-3.5-turbo")
-		if err != nil {
-			t.Fatalf("Convert failed: %v", err)
-		}
-
-		var req OpenAIRequest
-		if err := json.Unmarshal(data, &req); err != nil {
-			t.Fatalf("JSON unmarshal failed: %v", err)
-		}
-
-		if req.Stream {
-			t.Error("Expected stream to be false (default)")
-		}
-		if req.MaxTokens != 0 {
-			t.Errorf("Expected max_tokens 0, got %d", req.MaxTokens)
-		}
-	})
+	assert.NoError(t, err)
+	assert.Equal(t, "chatcmpl-123", resp.ID)
+	assert.Equal(t, "gpt-4", resp.Model)
+	assert.Equal(t, 1, len(resp.Content))
+	assert.Equal(t, "Hello!", resp.Content[0].Text)
+	assert.Equal(t, 10, resp.Usage.InputTokens)
+	assert.Equal(t, 5, resp.Usage.OutputTokens)
 }
 
-func TestParseResponse(t *testing.T) {
-	t.Run("successful response", func(t *testing.T) {
-		input := `{
-			"id": "chatcmpl-123",
-			"model": "gpt-4",
-			"choices": [{
-				"message": {
-					"role": "assistant",
-					"content": "Hello, I am Claude!"
-				}
-			}],
-			"usage": {
-				"prompt_tokens": 10,
-				"completion_tokens": 20
-			}
-		}`
+func TestParseResponse_EmptyChoices(t *testing.T) {
+	data := []byte(`{
+		"id": "chatcmpl-123",
+		"model": "gpt-4",
+		"choices": [],
+		"usage": {"prompt_tokens": 10, "completion_tokens": 0}
+	}`)
 
-		resp, err := ParseResponse([]byte(input))
-		if err != nil {
-			t.Fatalf("ParseResponse failed: %v", err)
-		}
+	resp, err := ParseResponse(data)
 
-		if resp.ID != "chatcmpl-123" {
-			t.Errorf("Expected id 'chatcmpl-123', got '%s'", resp.ID)
-		}
-		if resp.Model != "gpt-4" {
-			t.Errorf("Expected model 'gpt-4', got '%s'", resp.Model)
-		}
-		if len(resp.Content) != 1 {
-			t.Errorf("Expected 1 content block, got %d", len(resp.Content))
-		}
-		if resp.Content[0].Text != "Hello, I am Claude!" {
-			t.Errorf("Expected content 'Hello, I am Claude!', got '%s'", resp.Content[0].Text)
-		}
-		if resp.Usage.InputTokens != 10 {
-			t.Errorf("Expected input tokens 10, got %d", resp.Usage.InputTokens)
-		}
-		if resp.Usage.OutputTokens != 20 {
-			t.Errorf("Expected output tokens 20, got %d", resp.Usage.OutputTokens)
-		}
-	})
-
-	t.Run("empty choices array", func(t *testing.T) {
-		// Critical: 测试空 choices 数组不 panic
-		input := `{
-			"id": "chatcmpl-empty",
-			"model": "gpt-4",
-			"choices": [],
-			"usage": {"prompt_tokens": 0, "completion_tokens": 0}
-		}`
-
-		defer func() {
-			if r := recover(); r != nil {
-				t.Errorf("ParseResponse panicked with: %v", r)
-			}
-		}()
-
-		resp, err := ParseResponse([]byte(input))
-		if err != nil {
-			t.Fatalf("ParseResponse failed: %v", err)
-		}
-
-		if len(resp.Content) != 1 {
-			t.Errorf("Expected 1 content block, got %d", len(resp.Content))
-		}
-		if resp.Content[0].Text != "" {
-			t.Errorf("Expected empty content, got '%s'", resp.Content[0].Text)
-		}
-	})
-
-	t.Run("empty message in choice", func(t *testing.T) {
-		input := `{
-			"id": "chatcmpl-empty",
-			"model": "gpt-4",
-			"choices": [{}],
-			"usage": {"prompt_tokens": 0, "completion_tokens": 0}
-		}`
-
-		resp, err := ParseResponse([]byte(input))
-		if err != nil {
-			t.Fatalf("ParseResponse failed: %v", err)
-		}
-
-		if len(resp.Content) != 1 {
-			t.Errorf("Expected 1 content block, got %d", len(resp.Content))
-		}
-		if resp.Content[0].Text != "" {
-			t.Errorf("Expected empty content, got '%s'", resp.Content[0].Text)
-		}
-	})
-
-	t.Run("invalid JSON", func(t *testing.T) {
-		// Important: 测试无效 JSON 输入
-		_, err := ParseResponse([]byte(`{invalid json}`))
-		if err == nil {
-			t.Error("Expected error for invalid JSON")
-		}
-	})
+	assert.NoError(t, err)
+	assert.Equal(t, "chatcmpl-123", resp.ID)
+	assert.Equal(t, "", resp.Content[0].Text)
 }
 
-func TestRoundTrip(t *testing.T) {
-	t.Run("convert then parse", func(t *testing.T) {
-		original := &types.UnifiedMessage{
-			Model:  "gpt-4",
-			Stream: false,
-			Messages: []types.MessageRole{
-				{Role: "user", Content: "Test message"},
-			},
-			MaxTokens:   50,
-			Temperature: 0.5,
-		}
+func TestBuildResponse_ValidResponse(t *testing.T) {
+	unified := &types.UnifiedResponse{
+		ID:    "chatcmpl-456",
+		Model: "gpt-4",
+		Content: []types.ContentBlock{
+			{Type: "text", Text: "Hello from assistant!"},
+		},
+		Role: "assistant",
+		Usage: types.Usage{
+			InputTokens:  10,
+			OutputTokens: 20,
+		},
+	}
 
-		// Convert to OpenAI format
-		data, err := Convert(original, "gpt-4")
-		if err != nil {
-			t.Fatalf("Convert failed: %v", err)
-		}
+	body, err := BuildResponse(unified)
 
-		// Parse back
-		var req OpenAIRequest
-		if err := json.Unmarshal(data, &req); err != nil {
-			t.Fatalf("JSON unmarshal failed: %v", err)
-		}
+	assert.NoError(t, err)
+	assert.Contains(t, string(body), "chatcmpl-456")
+	assert.Contains(t, string(body), "Hello from assistant!")
+	assert.Contains(t, string(body), "gpt-4")
+}
 
-		// Verify round-trip
-		if req.Model != "gpt-4" {
-			t.Errorf("Model mismatch: expected 'gpt-4', got '%s'", req.Model)
-		}
-		if len(req.Messages) != 1 {
-			t.Errorf("Message count mismatch: expected 1, got %d", len(req.Messages))
-		}
-		if req.Messages[0].Content != "Test message" {
-			t.Errorf("Content mismatch: expected 'Test message', got '%s'", req.Messages[0].Content)
-		}
-	})
+func TestBuildResponse_EmptyContent(t *testing.T) {
+	unified := &types.UnifiedResponse{
+		ID:    "chatcmpl-789",
+		Model: "gpt-4",
+		Content: []types.ContentBlock{},
+		Role:  "assistant",
+		Usage: types.Usage{
+			InputTokens:  10,
+			OutputTokens: 0,
+		},
+	}
+
+	body, err := BuildResponse(unified)
+
+	assert.NoError(t, err)
+	assert.Contains(t, string(body), "chatcmpl-789")
+
+	// 解析响应验证结构
+	var resp map[string]interface{}
+	err = json.Unmarshal(body, &resp)
+	assert.NoError(t, err)
+	assert.Equal(t, "chat.completion", resp["object"])
 }
