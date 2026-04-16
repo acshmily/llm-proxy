@@ -5,6 +5,52 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.4.0] - 2026-04-16
+
+### 新增
+- **OpenAI 协议支持**
+  - 新增 `/v1/chat/completions` 端点，支持 OpenAI Chat Completion API
+  - 支持流式和非流式响应
+  - 智能协议转换：OpenAI 请求 → OpenAI/Anthropic/Gemini 后端
+
+- **协议转换器**
+  - `internal/protocol/openai` 模块实现
+  - OpenAI 请求解析 (`ParseRequest`)
+  - OpenAI 响应构建 (`BuildResponse`)
+  - `finish_reason` 映射支持（stop/length/content_filter）
+
+- **双协议架构**
+  - 保留原有 Anthropic 协议 (`/v1/messages`)
+  - 新增 OpenAI 协议 (`/v1/chat/completions`)
+  - 两种协议可混合使用，路由配置无需修改
+
+### 改进
+- **finish_reason 映射**
+  - Anthropic: `end_turn`/`stop_sequence` → `stop`, `max_tokens` → `length`
+  - Gemini: `STOP` → `stop`, `MAX_TOKENS` → `length`, `SAFETY`/`RECITATION` → `content_filter`
+  - OpenAI: 直接使用后端返回的标准值
+
+- **错误处理**
+  - 统一错误格式为 OpenAI 兼容结构
+  - 后端错误消息提取和转换
+
+- **客户端兼容性**
+  - 支持 OpenAI SDK (Python/Node.js/Go 等)
+  - 支持 Anthropic SDK
+  - 支持任意 OpenAI 兼容客户端
+
+### 测试
+- 6 个 OpenAI 协议集成测试（OpenAI/Anthropic/Gemini 后端）
+- 9 个协议转换器单元测试
+- 流式响应协议转换测试
+
+### 文档
+- README.md 添加 OpenAI 协议使用示例
+- config.example.yaml 添加协议说明
+- OpenAI SDK 调用示例（Python/curl）
+
+---
+
 ## [0.3.2] - 2026-04-16
 
 ### 修复
