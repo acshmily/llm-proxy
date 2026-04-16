@@ -54,8 +54,10 @@ func ParseResponse(data []byte) (*types.UnifiedResponse, error) {
 
 	// 处理空 choices 数组或缺失 message 的情况
 	var content string
+	var finishReason string
 	if len(resp.Choices) > 0 {
 		content = resp.Choices[0].Message.Content
+		finishReason = resp.Choices[0].FinishReason
 	}
 
 	unified := &types.UnifiedResponse{
@@ -64,7 +66,8 @@ func ParseResponse(data []byte) (*types.UnifiedResponse, error) {
 		Content: []types.ContentBlock{
 			{Type: "text", Text: content},
 		},
-		Role: "assistant",
+		Role:         "assistant",
+		FinishReason: finishReason,
 		Usage: types.Usage{
 			InputTokens:  resp.Usage.PromptTokens,
 			OutputTokens: resp.Usage.CompletionTokens,
@@ -112,6 +115,12 @@ func BuildResponse(unified *types.UnifiedResponse) ([]byte, error) {
 		content = unified.Content[0].Text
 	}
 
+	// 映射 finish_reason
+	finishReason := unified.FinishReason
+	if finishReason == "" {
+		finishReason = "stop"
+	}
+
 	resp := ChatCompletionResponse{
 		ID:      unified.ID,
 		Object:  "chat.completion",
@@ -123,7 +132,7 @@ func BuildResponse(unified *types.UnifiedResponse) ([]byte, error) {
 				Role:    "assistant",
 				Content: content,
 			},
-			FinishReason: "stop",
+			FinishReason: finishReason,
 		}},
 		Usage: Usage{
 			PromptTokens:     unified.Usage.InputTokens,

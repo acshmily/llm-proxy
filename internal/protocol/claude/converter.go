@@ -49,13 +49,32 @@ func ParseResponse(data []byte) (*types.UnifiedResponse, error) {
 		}
 	}
 
+	// 映射 Anthropic stop_reason 到 OpenAI 标准值
+	finishReason := ""
+	if stopReason, ok := resp["stop_reason"].(string); ok {
+		finishReason = mapAnthropicFinishReason(stopReason)
+	}
+
 	return &types.UnifiedResponse{
-		ID:      getString(resp, "id"),
-		Model:   getString(resp, "model"),
-		Content: content,
-		Role:    "assistant",
-		Usage:   usage,
+		ID:           getString(resp, "id"),
+		Model:        getString(resp, "model"),
+		Content:      content,
+		Role:         "assistant",
+		FinishReason: finishReason,
+		Usage:        usage,
 	}, nil
+}
+
+// mapAnthropicFinishReason 映射 Anthropic stop_reason 到 OpenAI 标准值
+func mapAnthropicFinishReason(reason string) string {
+	switch reason {
+	case "end_turn", "stop_sequence":
+		return "stop"
+	case "max_tokens":
+		return "length"
+	default:
+		return "stop"
+	}
 }
 
 func getString(m map[string]interface{}, key string) string {

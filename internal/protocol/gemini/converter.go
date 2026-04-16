@@ -41,19 +41,37 @@ func ParseResponse(data []byte) (*types.UnifiedResponse, error) {
 	}
 
 	var content []types.ContentBlock
+	var finishReason string
 	if len(resp.Candidates) > 0 && len(resp.Candidates[0].Content.Parts) > 0 {
 		content = append(content, types.ContentBlock{
 			Type: "text",
 			Text: resp.Candidates[0].Content.Parts[0].Text,
 		})
+		// 映射 Gemini finish_reason 到 OpenAI 标准值
+		finishReason = mapGeminiFinishReason(resp.Candidates[0].FinishReason)
 	}
 
 	return &types.UnifiedResponse{
-		ID:      fmt.Sprintf("gemini-%d", len(resp.Candidates)),
-		Model:   "gemini-pro",
-		Content: content,
-		Role:    "assistant",
+		ID:           fmt.Sprintf("gemini-%d", len(resp.Candidates)),
+		Model:        "gemini-pro",
+		Content:      content,
+		Role:         "assistant",
+		FinishReason: finishReason,
 	}, nil
+}
+
+// mapGeminiFinishReason 映射 Gemini finish_reason 到 OpenAI 标准值
+func mapGeminiFinishReason(reason string) string {
+	switch reason {
+	case "STOP":
+		return "stop"
+	case "MAX_TOKENS":
+		return "length"
+	case "SAFETY", "RECITATION":
+		return "content_filter"
+	default:
+		return "stop"
+	}
 }
 
 type GeminiResponse struct {
@@ -61,7 +79,8 @@ type GeminiResponse struct {
 }
 
 type Candidate struct {
-	Content Content `json:"content"`
+	Content      Content `json:"content"`
+	FinishReason string  `json:"finishReason"`
 }
 
 type Content struct {

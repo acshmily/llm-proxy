@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptrace"
@@ -477,14 +478,110 @@ func (s *Server) handleOpenAIStream(w http.ResponseWriter, resp *http.Response, 
 		logger.LogField{Key: "conn_reused", Value: connReused},
 	)
 
-	// 流式解析并转发
+	// 检测客户端断开连接
+	var clientDisconnected bool
+	if notifier, ok := w.(http.CloseNotifier); ok {
+		go func() {
+			<-notifier.CloseNotify()
+			clientDisconnected = true
+		}()
+	}
+
+	// 流式解析并转换为 OpenAI SSE 格式
 	stream.ParseSSE(resp.Body, func(event string, data []byte) {
-		w.Write(data)
-		w.Write([]byte("\n\n"))
-		if f, ok := w.(http.Flusher); ok {
-			f.Flush()
+		if clientDisconnected {
+			return
+		}
+
+		var openaiData []byte
+
+		switch backend {
+		case "openai":
+			// OpenAI 后端直接透传
+			openaiData = data
+		case "anthropic":
+			// 转换 Anthropic SSE 为 OpenAI SSE 格式
+			openaiData = convertAnthropicSSEToOpenAI(event, data)
+		case "gemini":
+			// 转换 Gemini SSE 为 OpenAI SSE 格式
+			openaiData = convertGeminiSSEToOpenAI(event, data)
+		}
+
+		if len(openaiData) > 0 {
+			w.Write(openaiData)
+			w.Write([]byte("\n\n"))
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
 		}
 	})
+}
+
+// convertAnthropicSSEToOpenAI 转换 Anthropic SSE 为 OpenAI 格式
+func convertAnthropicSSEToOpenAI(event string, data []byte) []byte {
+	// Anthropic SSE 事件类型：content_block_delta, content_block_stop, message_stop
+	// OpenAI SSE 格式：{"delta": {"content": "..."}, "finish_reason": null}
+
+	if event == "message_stop" {
+		return []byte(`data: {"choices":[{"delta":{},"finish_reason":"stop"}]}`)
+	}
+
+	if event == "content_block_delta" {
+		// 解析 Anthropic delta
+		var delta struct {
+			Delta struct {
+				Text string `json:"text"`
+			} `json:"delta"`
+		}
+		if err := json.Unmarshal(data, &delta); err == nil && delta.Delta.Text != "" {
+			return []byte(fmt.Sprintf(`data: {"choices":[{"delta":{"content":"%s"},"finish_reason":null}]}`, delta.Delta.Text))
+		}
+	}
+
+	return nil
+}
+
+// convertGeminiSSEToOpenAI 转换 Gemini SSE 为 OpenAI 格式
+func convertGeminiSSEToOpenAI(event string, data []byte) []byte {
+	// Gemini SSE 格式：{"candidates": [{"content": {"parts": [{"text": "..."}]}}]}
+
+	var geminiResp struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+			FinishReason string `json:"finishReason"`
+		} `json:"candidates"`
+	}
+
+	if err := json.Unmarshal(data, &geminiResp); err != nil {
+		return nil
+	}
+
+	if len(geminiResp.Candidates) > 0 && len(geminiResp.Candidates[0].Content.Parts) > 0 {
+		text := geminiResp.Candidates[0].Content.Parts[0].Text
+		finishReason := geminiResp.Candidates[0].FinishReason
+
+		var openaiFinishReason string
+		if finishReason == "STOP" {
+			openaiFinishReason = "stop"
+		} else if finishReason == "MAX_TOKENS" {
+			openaiFinishReason = "length"
+		} else {
+			openaiFinishReason = "stop"
+		}
+
+		if text != "" {
+			return []byte(fmt.Sprintf(`data: {"choices":[{"delta":{"content":"%s"},"finish_reason":null}]}`, text))
+		}
+		if finishReason != "" {
+			return []byte(fmt.Sprintf(`data: {"choices":[{"delta":{},"finish_reason":"%s"}]}`, openaiFinishReason))
+		}
+	}
+
+	return nil
 }
 
 func (s *Server) writeError(w http.ResponseWriter, code int, msg string) {
@@ -531,8 +628,32 @@ var errorCodeMap = map[int]string{
 
 // convertBackendError 转换后端错误为 OpenAI 格式
 func convertBackendError(backend string, body []byte) string {
-	// 简单实现：直接返回后端错误消息
-	// 可以进一步解析并格式化
+	// 尝试解析后端错误
+	var backendErr map[string]interface{}
+	if err := json.Unmarshal(body, &backendErr); err != nil {
+		return string(body)
+	}
+
+	// OpenAI 格式：{"error": {"message": "...", "type": "..."}}
+	// Anthropic 格式：{"error": {"message": "...", "type": "..."}}
+	// Gemini 格式：{"error": {"code": ..., "message": "..."}}
+
+	if backend == "openai" || backend == "anthropic" {
+		if errMap, ok := backendErr["error"].(map[string]interface{}); ok {
+			if msg, ok := errMap["message"].(string); ok {
+				return msg
+			}
+		}
+	}
+
+	if backend == "gemini" {
+		if errMap, ok := backendErr["error"].(map[string]interface{}); ok {
+			if msg, ok := errMap["message"].(string); ok {
+				return msg
+			}
+		}
+	}
+
 	return string(body)
 }
 

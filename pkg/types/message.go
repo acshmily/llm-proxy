@@ -19,11 +19,12 @@ type MessageRole struct {
 
 // UnifiedResponse 统一响应格式
 type UnifiedResponse struct {
-	ID      string         `json:"id"`
-	Model   string         `json:"model"`
-	Content []ContentBlock `json:"content"`
-	Role    string         `json:"role"`
-	Usage   Usage          `json:"usage"`
+	ID           string         `json:"id"`
+	Model        string         `json:"model"`
+	Content      []ContentBlock `json:"content"`
+	Role         string         `json:"role"`
+	FinishReason string         `json:"finish_reason,omitempty"`
+	Usage        Usage          `json:"usage"`
 }
 
 // ContentBlock 内容块
