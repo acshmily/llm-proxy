@@ -5,6 +5,19 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.3.2] - 2026-04-16
+
+### 修复
+- **重要**: Gemini API 认证方式错误（401 UNAUTHENTICATED）
+  - Gemini API 使用 URL 参数 `?key=` 而非 `Authorization: Bearer` Header
+  - 修复后 Gemini 后端可正常使用
+
+### 文档
+- 添加 Gemini API Key 格式说明（AIzaSyD-xxx，无需 Bearer 前缀）
+- 添加 Gemini API Key 获取链接：https://makersuite.google.com/app/apikey
+
+---
+
 ## [0.3.1] - 2026-04-15
 
 ### 修复
