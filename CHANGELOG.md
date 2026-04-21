@@ -170,6 +170,69 @@
 
 ## 升级指南
 
+### 从 v0.3.x 升级到 v0.4.0
+
+**无破坏性变更** - 配置完全向后兼容。
+
+**新增功能：**
+- `/v1/chat/completions` 端点（OpenAI 协议）
+- 支持 OpenAI SDK、Anthropic SDK 任意调用
+- 智能协议转换（OpenAI → OpenAI/Anthropic/Gemini 后端）
+- `finish_reason` 映射支持
+
+**升级步骤：**
+1. 停止旧版本服务
+2. 部署 v0.4.0 二进制文件或 Docker 镜像
+3. 重启服务（`config.yaml` 无需修改）
+
+**使用新协议（可选）：**
+
+```python
+# Python OpenAI SDK
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8848",  # 代理地址
+    api_key="sk-client-1"              # 配置的客户端 Key
+)
+
+response = client.chat.completions.create(
+    model="claude-3-opus",
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+```
+
+```bash
+# curl 调用
+curl http://localhost:8848/v1/chat/completions \
+  -H "Authorization: Bearer sk-client-1" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"claude-3-opus","messages":[{"role":"user","content":"Hello!"}]}'
+```
+
+---
+
+### 从 v0.2.x 升级到 v0.3.0
+
+**新增功能：**
+- WebSocket 隧道客户端 (`ws-client`)
+- 协议转换器完整测试覆盖（OpenAI/Gemini/Claude）
+- GitHub Actions CI 改进（Go 版本矩阵、Codecov）
+
+**升级步骤：**
+1. 下载 v0.3.0 二进制文件（包含 `proxy` 和 `ws-client`）
+2. 部署新版本
+3. （可选）如需使用 WebSocket 隧道，启动 `ws-client`：
+
+```bash
+./ws-client --server ws://your-server:8080/ws-tunnel --listen :8081
+
+# 将应用代理地址指向 ws-client
+export HTTP_PROXY=http://localhost:8081
+```
+
+---
+
 ### 从 v0.1.x 升级到 v0.2.0
 
 **新增配置项：**
