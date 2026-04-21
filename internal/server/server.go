@@ -131,6 +131,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// 根据路径路由到不同协议处理器
 	switch {
+	case r.URL.Path == "/v1/models" && r.Method == http.MethodGet:
+		s.serveModelsList(w, r)
+		return
 	case r.URL.Path == "/v1/chat/completions" && r.Method == http.MethodPost:
 		s.serveOpenAIRequest(w, r)
 		return
@@ -696,6 +699,166 @@ func (s *Server) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "healthy",
 		"time":   time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// serveModelsList 返回所有已配置后端的模型列表（OpenAI 兼容格式）
+func (s *Server) serveModelsList(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	type modelInfo struct {
+		ID        string `json:"id"`
+		Object    string `json:"object"`
+		Created   int64  `json:"created"`
+		OwnedBy   string `json:"owned_by"`
+	}
+
+	type modelsResponse struct {
+		Object string      `json:"object"`
+		Data   []modelInfo `json:"data"`
+	}
+
+	var allModels []modelInfo
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	// 后端查询函数
+	type backendQuery struct {
+		name    string
+		url     string
+		ownedBy string
+	}
+
+	backends := []backendQuery{}
+
+	if s.cfg.Backends.OpenAI.BaseURL != "" {
+		backends = append(backends, backendQuery{
+			name:    "openai",
+			url:     s.cfg.Backends.OpenAI.BaseURL + "/models",
+			ownedBy: "openai",
+		})
+	}
+	if s.cfg.Backends.Anthropic.BaseURL != "" {
+		backends = append(backends, backendQuery{
+			name:    "anthropic",
+			url:     s.cfg.Backends.Anthropic.BaseURL + "/v1/models",
+			ownedBy: "anthropic",
+		})
+	}
+	if s.cfg.Backends.Gemini.BaseURL != "" {
+		// Gemini API 需要 API Key，遍历所有路由获取
+		for _, route := range s.cfg.Routes {
+			if route.Backend == "gemini" {
+				backends = append(backends, backendQuery{
+					name:    "gemini",
+					url:     s.cfg.Backends.Gemini.BaseURL + "/models?key=" + route.BackendKey,
+					ownedBy: "google",
+				})
+				break // 只需查询一次
+			}
+		}
+	}
+
+	for _, be := range backends {
+		wg.Add(1)
+		go func(bq backendQuery) {
+			defer wg.Done()
+
+			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+			defer cancel()
+
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, bq.url, nil)
+			if err != nil {
+				s.log.Error("Failed to create models request for backend",
+					logger.LogField{Key: "backend", Value: bq.name},
+					logger.LogField{Key: "error", Value: err.Error()},
+				)
+				return
+			}
+
+			resp, err := s.client.Do(req)
+			if err != nil {
+				s.log.Error("Failed to fetch models from backend",
+					logger.LogField{Key: "backend", Value: bq.name},
+					logger.LogField{Key: "error", Value: err.Error()},
+				)
+				return
+			}
+			defer resp.Body.Close()
+
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				return
+			}
+
+			if resp.StatusCode != http.StatusOK {
+				s.log.Error("Backend returned error for models endpoint",
+					logger.LogField{Key: "backend", Value: bq.name},
+					logger.LogField{Key: "status", Value: resp.StatusCode},
+					logger.LogField{Key: "body", Value: string(body)},
+				)
+				return
+			}
+
+			// 解析后端响应
+			var backendModels struct {
+				Data []struct {
+					ID       string `json:"id"`
+					Object   string `json:"object"`
+					Created  int64  `json:"created"`
+					OwnedBy  string `json:"owned_by"`
+				} `json:"data"`
+			}
+
+			// Gemini 使用 models 字段而非 data
+			var geminiModels struct {
+				Models []struct {
+					Name string `json:"name"`
+				} `json:"models"`
+			}
+
+			if bq.name == "gemini" {
+				if err := json.Unmarshal(body, &geminiModels); err == nil {
+					mu.Lock()
+					for _, m := range geminiModels.Models {
+						// Gemini 返回格式: "models/gemini-2.5-flash"
+						id := m.Name
+						if len(id) > 7 && id[:7] == "models/" {
+							id = id[7:]
+						}
+						allModels = append(allModels, modelInfo{
+							ID:      id,
+							Object:  "model",
+							Created: time.Now().Unix(),
+							OwnedBy: bq.ownedBy,
+						})
+					}
+					mu.Unlock()
+				}
+			} else if err := json.Unmarshal(body, &backendModels); err == nil {
+				mu.Lock()
+				for _, m := range backendModels.Data {
+					allModels = append(allModels, modelInfo{
+						ID:      m.ID,
+						Object:  "model",
+						Created: m.Created,
+						OwnedBy: m.OwnedBy,
+					})
+				}
+				mu.Unlock()
+			}
+		}(be)
+	}
+
+	wg.Wait()
+
+	if allModels == nil {
+		allModels = []modelInfo{}
+	}
+
+	json.NewEncoder(w).Encode(modelsResponse{
+		Object: "list",
+		Data:   allModels,
 	})
 }
 
