@@ -785,6 +785,10 @@ func (s *Server) handleCompletionsStream(w http.ResponseWriter, resp *http.Respo
 
 // convertOpenAISSEToCompletions 转换 OpenAI SSE 为 Completions 格式
 func convertOpenAISSEToCompletions(event string, data []byte) []byte {
+	if bytes.Equal(data, []byte("[DONE]")) {
+		return []byte("data: [DONE]")
+	}
+
 	var msg map[string]interface{}
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return nil
@@ -792,8 +796,10 @@ func convertOpenAISSEToCompletions(event string, data []byte) []byte {
 	if choices, ok := msg["choices"].([]interface{}); ok && len(choices) > 0 {
 		if choice, ok := choices[0].(map[string]interface{}); ok {
 			if delta, ok := choice["delta"].(map[string]interface{}); ok {
-				if content, ok := delta["content"]; ok {
-					choice["text"] = content
+				if content, ok := delta["content"]; ok && content != nil {
+					if str, ok := content.(string); ok {
+						choice["text"] = str
+					}
 					delete(choice, "delta")
 				}
 			}
