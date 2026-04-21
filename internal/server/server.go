@@ -137,6 +137,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/v1/chat/completions" && r.Method == http.MethodPost:
 		s.serveOpenAIRequest(w, r)
 		return
+	case r.URL.Path == "/v1/completions" && r.Method == http.MethodPost:
+		s.serveCompletionsRequest(w, r)
+		return
 	case r.URL.Path == "/v1/messages" && r.Method == http.MethodPost:
 		// 现有 Anthropic 端点
 		s.serveRequest(w, r)
@@ -366,6 +369,133 @@ func (s *Server) serveOpenAIRequest(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// serveCompletionsRequest 处理 OpenAI Completions 格式请求（旧版 /v1/completions）
+func (s *Server) serveCompletionsRequest(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+
+	// 获取 API Key
+	apiKey := r.Header.Get("x-api-key")
+	if apiKey == "" {
+		apiKey = extractBearerToken(r.Header.Get("Authorization"))
+	}
+
+	route, found := s.router.FindRoute(apiKey)
+	if !found {
+		s.writeError(w, http.StatusUnauthorized, "Invalid API key")
+		return
+	}
+
+	// 读取请求体
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, "Failed to read request body")
+		return
+	}
+
+	// 解析 Completions 格式（prompt 字段），转换为统一格式
+	var completionsReq struct {
+		Model       string  `json:"model"`
+		Prompt      string  `json:"prompt"`
+		Stream      bool    `json:"stream"`
+		MaxTokens   int     `json:"max_tokens"`
+		Temperature float64 `json:"temperature"`
+		TopP        float64 `json:"top_p"`
+		Stop        []string `json:"stop"`
+	}
+	if err := json.Unmarshal(body, &completionsReq); err != nil {
+		s.writeError(w, http.StatusBadRequest, "Invalid request format")
+		return
+	}
+
+	// 转换为统一消息格式
+	unified := &types.UnifiedMessage{
+		Model:    completionsReq.Model,
+		Stream:   completionsReq.Stream,
+		Messages: []types.MessageRole{{Role: "user", Content: completionsReq.Prompt}},
+		MaxTokens: completionsReq.MaxTokens,
+		Temperature: completionsReq.Temperature,
+		TopP:     completionsReq.TopP,
+		StopSequences: completionsReq.Stop,
+	}
+
+	// 复用现有后端处理逻辑
+	model := unified.Model
+	if model == "" {
+		model = getDefaultModel(route.Backend)
+	}
+
+	var backendURL string
+	var reqBody []byte
+
+	switch route.Backend {
+	case "openai":
+		backendURL = s.cfg.Backends.OpenAI.BaseURL + "/chat/completions"
+		reqBody, err = openai.Convert(unified, model)
+	case "anthropic":
+		backendURL = s.cfg.Backends.Anthropic.BaseURL + "/v1/messages"
+		reqBody, err = claude.Convert(unified, model)
+	case "gemini":
+		backendURL = s.cfg.Backends.Gemini.BaseURL + "/models/" + model + ":generateContent"
+		reqBody, err = gemini.Convert(unified, model)
+		if err == nil {
+			backendURL = backendURL + "?key=" + route.BackendKey
+		}
+	default:
+		s.writeError(w, http.StatusBadRequest, "Unknown backend")
+		return
+	}
+
+	if err != nil {
+		s.log.Error("Protocol conversion failed",
+			logger.LogField{Key: "backend", Value: route.Backend},
+			logger.LogField{Key: "error", Value: err.Error()},
+		)
+		s.writeError(w, http.StatusInternalServerError, "Failed to convert protocol")
+		return
+	}
+
+	backendReq, err := http.NewRequest(r.Method, backendURL, bytes.NewReader(reqBody))
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "Failed to create backend request")
+		return
+	}
+
+	if route.Backend != "gemini" {
+		backendReq.Header.Set("Authorization", "Bearer "+route.BackendKey)
+	}
+	backendReq.Header.Set("Content-Type", "application/json")
+
+	ctx, cancel := context.WithTimeout(r.Context(), route.Timeout)
+	defer cancel()
+
+	var connReused bool
+	connReused = true
+
+	trace := &httptrace.ClientTrace{
+		GotConn: func(info httptrace.GotConnInfo) {
+			connReused = info.Reused
+		},
+	}
+	ctx = httptrace.WithClientTrace(ctx, trace)
+
+	resp, err := s.client.Do(backendReq.WithContext(ctx))
+	if err != nil {
+		s.writeError(w, http.StatusBadGateway, "Backend request failed")
+		return
+	}
+	defer resp.Body.Close()
+
+	latency := time.Since(start).Milliseconds()
+	s.poolStats.RecordRequest(connReused)
+
+	// 处理响应并转换为 Completions 格式
+	if unified.Stream {
+		s.handleCompletionsStream(w, resp, route.Backend, connReused, r)
+	} else {
+		s.handleCompletionsNonStream(w, resp, route.Backend, model, latency, start, connReused)
+	}
+}
+
 func (s *Server) handleStream(w http.ResponseWriter, resp *http.Response, backend string, connReused bool) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -530,6 +660,226 @@ func (s *Server) handleOpenAIStream(w http.ResponseWriter, resp *http.Response, 
 			}
 		}
 	})
+}
+
+// handleCompletionsNonStream 处理 Completions 非流式响应（/v1/completions）
+func (s *Server) handleCompletionsNonStream(w http.ResponseWriter, resp *http.Response, backend string, model string, latency int64, start time.Time, connReused bool) {
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		s.writeError(w, resp.StatusCode, convertBackendError(backend, body))
+		return
+	}
+
+	var unified *types.UnifiedResponse
+	var err error
+
+	switch backend {
+	case "openai":
+		unified, err = openai.ParseResponse(body)
+	case "anthropic":
+		unified, err = claude.ParseResponse(body)
+	case "gemini":
+		unified, err = gemini.ParseResponse(body, model)
+	}
+
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "Failed to parse response")
+		return
+	}
+
+	respBody, err := buildCompletionsResponse(unified)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "Failed to build response")
+		return
+	}
+
+	s.log.Info("Completions request completed",
+		logger.LogField{Key: "latency_ms", Value: latency},
+		logger.LogField{Key: "status_code", Value: resp.StatusCode},
+		logger.LogField{Key: "backend", Value: backend},
+		logger.LogField{Key: "conn_reused", Value: connReused},
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(respBody)
+}
+
+// buildCompletionsResponse 将统一响应转换为 Completions 格式
+func buildCompletionsResponse(unified *types.UnifiedResponse) ([]byte, error) {
+	var text string
+	if len(unified.Content) > 0 {
+		text = unified.Content[0].Text
+	}
+
+	finishReason := unified.FinishReason
+	if finishReason == "" {
+		finishReason = "stop"
+	}
+
+	resp := map[string]interface{}{
+		"id":      unified.ID,
+		"object":  "text_completion",
+		"created": time.Now().Unix(),
+		"model":   unified.Model,
+		"choices": []map[string]interface{}{
+			{"text": text, "index": 0, "finish_reason": finishReason},
+		},
+		"usage": map[string]interface{}{
+			"prompt_tokens":     unified.Usage.InputTokens,
+			"completion_tokens": unified.Usage.OutputTokens,
+			"total_tokens":      unified.Usage.InputTokens + unified.Usage.OutputTokens,
+		},
+	}
+
+	return json.Marshal(resp)
+}
+
+// handleCompletionsStream 处理 Completions 流式响应
+func (s *Server) handleCompletionsStream(w http.ResponseWriter, resp *http.Response, backend string, connReused bool, req *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	s.log.Info("Completions stream request completed",
+		logger.LogField{Key: "backend", Value: backend},
+		logger.LogField{Key: "conn_reused", Value: connReused},
+	)
+
+	clientDisconnected := make(chan struct{})
+	go func() {
+		select {
+		case <-req.Context().Done():
+			close(clientDisconnected)
+		}
+	}()
+
+	stream.ParseSSE(resp.Body, func(event string, data []byte) {
+		select {
+		case <-clientDisconnected:
+			return
+		default:
+		}
+
+		var completionsData []byte
+
+		switch backend {
+		case "openai":
+			completionsData = convertOpenAISSEToCompletions(event, data)
+		case "anthropic":
+			completionsData = convertAnthropicSSEToCompletions(event, data)
+		case "gemini":
+			completionsData = convertGeminiSSEToCompletions(event, data)
+		}
+
+		if len(completionsData) > 0 {
+			w.Write(completionsData)
+			w.Write([]byte("\n\n"))
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+	})
+}
+
+// convertOpenAISSEToCompletions 转换 OpenAI SSE 为 Completions 格式
+func convertOpenAISSEToCompletions(event string, data []byte) []byte {
+	var msg map[string]interface{}
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return nil
+	}
+	if choices, ok := msg["choices"].([]interface{}); ok && len(choices) > 0 {
+		if choice, ok := choices[0].(map[string]interface{}); ok {
+			if delta, ok := choice["delta"].(map[string]interface{}); ok {
+				if content, ok := delta["content"]; ok {
+					choice["text"] = content
+					delete(choice, "delta")
+				}
+			}
+		}
+	}
+	result, _ := json.Marshal(msg)
+	return append([]byte("data: "), result...)
+}
+
+// convertAnthropicSSEToCompletions 转换 Anthropic SSE 为 Completions 格式
+func convertAnthropicSSEToCompletions(event string, data []byte) []byte {
+	if event == "message_stop" {
+		return []byte(`data: {"choices":[{"text":"","finish_reason":"stop"}]}`)
+	}
+
+	if event == "content_block_delta" {
+		var delta struct {
+			Delta struct {
+				Text string `json:"text"`
+			} `json:"delta"`
+		}
+		if err := json.Unmarshal(data, &delta); err == nil && delta.Delta.Text != "" {
+			payload := map[string]interface{}{
+				"choices": []map[string]interface{}{
+					{"text": delta.Delta.Text, "finish_reason": nil},
+				},
+			}
+			result, _ := json.Marshal(payload)
+			return append([]byte("data: "), result...)
+		}
+	}
+
+	return nil
+}
+
+// convertGeminiSSEToCompletions 转换 Gemini SSE 为 Completions 格式
+func convertGeminiSSEToCompletions(event string, data []byte) []byte {
+	var geminiResp struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+			FinishReason string `json:"finishReason"`
+		} `json:"candidates"`
+	}
+
+	if err := json.Unmarshal(data, &geminiResp); err != nil {
+		return nil
+	}
+
+	if len(geminiResp.Candidates) > 0 && len(geminiResp.Candidates[0].Content.Parts) > 0 {
+		text := geminiResp.Candidates[0].Content.Parts[0].Text
+		finishReason := geminiResp.Candidates[0].FinishReason
+
+		var openaiFinishReason string
+		if finishReason == "STOP" {
+			openaiFinishReason = "stop"
+		} else if finishReason == "MAX_TOKENS" {
+			openaiFinishReason = "length"
+		} else {
+			openaiFinishReason = "stop"
+		}
+
+		if text != "" {
+			payload := map[string]interface{}{
+				"choices": []map[string]interface{}{
+					{"text": text, "finish_reason": nil},
+				},
+			}
+			result, _ := json.Marshal(payload)
+			return append([]byte("data: "), result...)
+		}
+		if finishReason != "" {
+			payload := map[string]interface{}{
+				"choices": []map[string]interface{}{
+					{"text": "", "finish_reason": openaiFinishReason},
+				},
+			}
+			result, _ := json.Marshal(payload)
+			return append([]byte("data: "), result...)
+		}
+	}
+
+	return nil
 }
 
 // convertAnthropicSSEToOpenAI 转换 Anthropic SSE 为 OpenAI 格式
