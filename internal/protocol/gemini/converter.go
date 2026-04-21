@@ -7,13 +7,25 @@ import (
 	"github.com/claude-projetc/llm-proxy/pkg/types"
 )
 
+// mapToGeminiRole 映射 OpenAI/Claude 角色到 Gemini 兼容角色
+func mapToGeminiRole(role string) string {
+	switch role {
+	case "system", "developer", "tool":
+		return "user"
+	case "assistant":
+		return "model"
+	default:
+		return role
+	}
+}
+
 // Convert 统一格式 -> Gemini 格式
 func Convert(um *types.UnifiedMessage, modelOverride string) ([]byte, error) {
 	// Gemini 使用 contents 数组
 	contents := make([]map[string]interface{}, len(um.Messages))
 	for i, msg := range um.Messages {
 		contents[i] = map[string]interface{}{
-			"role": msg.Role,
+			"role": mapToGeminiRole(msg.Role),
 			"parts": []map[string]string{
 				{"text": msg.Content},
 			},

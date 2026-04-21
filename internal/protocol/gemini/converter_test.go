@@ -7,6 +7,62 @@ import (
 	"github.com/claude-projetc/llm-proxy/pkg/types"
 )
 
+func TestMapToGeminiRole(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"system", "user"},
+		{"developer", "user"},
+		{"tool", "user"},
+		{"assistant", "model"},
+		{"user", "user"},
+		{"model", "model"},
+	}
+
+	for _, tt := range tests {
+		if got := mapToGeminiRole(tt.input); got != tt.expected {
+			t.Errorf("mapToGeminiRole(%q) = %q, want %q", tt.input, got, tt.expected)
+		}
+	}
+}
+
+func TestConvert_RoleMapping(t *testing.T) {
+	um := &types.UnifiedMessage{
+		Model: "gemini-pro",
+		Messages: []types.MessageRole{
+			{Role: "system", Content: "You are helpful."},
+			{Role: "user", Content: "Hello"},
+			{Role: "assistant", Content: "Hi"},
+		},
+	}
+
+	data, err := Convert(um, "gemini-pro")
+	if err != nil {
+		t.Fatalf("Convert failed: %v", err)
+	}
+
+	var req map[string]interface{}
+	if err := json.Unmarshal(data, &req); err != nil {
+		t.Fatalf("JSON unmarshal failed: %v", err)
+	}
+
+	contents, ok := req["contents"].([]interface{})
+	if !ok {
+		t.Fatal("Expected contents array")
+	}
+
+	first := contents[0].(map[string]interface{})
+	if first["role"] != "user" {
+		t.Errorf("Expected system role mapped to 'user', got '%v'", first["role"])
+	}
+
+	third := contents[2].(map[string]interface{})
+	if third["role"] != "model" {
+		t.Errorf("Expected assistant role mapped to 'model', got '%v'", third["role"])
+	}
+}
+
 func TestConvert(t *testing.T) {
 	t.Run("basic conversion", func(t *testing.T) {
 		um := &types.UnifiedMessage{
