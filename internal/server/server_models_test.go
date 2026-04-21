@@ -161,3 +161,44 @@ func TestServer_ModelsList_WrongMethod(t *testing.T) {
 
 	assert.Equal(t, http.StatusNotFound, rr.Code)
 }
+
+func TestServer_ModelsList_AuthHeaders(t *testing.T) {
+	// 验证 OpenAI 后端发送 Bearer token
+	openaiBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "Bearer sk-openai-key", r.Header.Get("Authorization"))
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"data": [{"id": "gpt-4", "object": "model"}]}`))
+	}))
+	defer openaiBackend.Close()
+
+	// 验证 Anthropic 后端发送 x-api-key
+	anthropicBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "sk-anthropic-key", r.Header.Get("x-api-key"))
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"data": [{"id": "claude-3", "object": "model"}]}`))
+	}))
+	defer anthropicBackend.Close()
+
+	cfg := &config.Config{
+		Routes: []config.RouteConfig{
+			{APIKey: "sk-openai", Backend: "openai", BackendKey: "sk-openai-key", Timeout: 30000000000},
+			{APIKey: "sk-anthropic", Backend: "anthropic", BackendKey: "sk-anthropic-key", Timeout: 30000000000},
+		},
+		Backends: config.BackendsConfig{
+			OpenAI:    config.BackendConfig{BaseURL: openaiBackend.URL},
+			Anthropic: config.BackendConfig{BaseURL: anthropicBackend.URL},
+		},
+	}
+
+	r := router.New(cfg.Routes)
+	log := logger.New(logger.TEXT, logger.INFO)
+	srv := New(cfg, r, log)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+}

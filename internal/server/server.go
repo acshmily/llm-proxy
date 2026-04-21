@@ -727,26 +727,40 @@ func (s *Server) serveModelsList(w http.ResponseWriter, r *http.Request) {
 		name    string
 		url     string
 		ownedBy string
+		auth    string // Authorization header 值，Gemini 留空
+	}
+
+	// 从路由中查找对应后端的 API Key
+	findKey := func(backendName string) string {
+		for _, route := range s.cfg.Routes {
+			if route.Backend == backendName {
+				return route.BackendKey
+			}
+		}
+		return ""
 	}
 
 	backends := []backendQuery{}
 
 	if s.cfg.Backends.OpenAI.BaseURL != "" {
+		key := findKey("openai")
 		backends = append(backends, backendQuery{
 			name:    "openai",
 			url:     s.cfg.Backends.OpenAI.BaseURL + "/models",
 			ownedBy: "openai",
+			auth:    "Bearer " + key,
 		})
 	}
 	if s.cfg.Backends.Anthropic.BaseURL != "" {
+		key := findKey("anthropic")
 		backends = append(backends, backendQuery{
 			name:    "anthropic",
 			url:     s.cfg.Backends.Anthropic.BaseURL + "/v1/models",
 			ownedBy: "anthropic",
+			auth:    key,
 		})
 	}
 	if s.cfg.Backends.Gemini.BaseURL != "" {
-		// Gemini API 需要 API Key，遍历所有路由获取
 		for _, route := range s.cfg.Routes {
 			if route.Backend == "gemini" {
 				backends = append(backends, backendQuery{
@@ -754,7 +768,7 @@ func (s *Server) serveModelsList(w http.ResponseWriter, r *http.Request) {
 					url:     s.cfg.Backends.Gemini.BaseURL + "/models?key=" + route.BackendKey,
 					ownedBy: "google",
 				})
-				break // 只需查询一次
+				break
 			}
 		}
 	}
@@ -774,6 +788,14 @@ func (s *Server) serveModelsList(w http.ResponseWriter, r *http.Request) {
 					logger.LogField{Key: "error", Value: err.Error()},
 				)
 				return
+			}
+			if bq.auth != "" {
+				if bq.name == "anthropic" {
+					req.Header.Set("x-api-key", bq.auth)
+				} else {
+					req.Header.Set("Authorization", bq.auth)
+				}
+				req.Header.Set("Content-Type", "application/json")
 			}
 
 			resp, err := s.client.Do(req)
