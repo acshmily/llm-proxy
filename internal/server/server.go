@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptrace"
@@ -293,16 +292,27 @@ func (s *Server) serveOpenAIRequest(w http.ResponseWriter, r *http.Request) {
 	switch route.Backend {
 	case "openai":
 		backendURL = s.cfg.Backends.OpenAI.BaseURL + "/chat/completions"
-		reqBody, _ = openai.Convert(unified, model)
+		reqBody, err = openai.Convert(unified, model)
 	case "anthropic":
 		backendURL = s.cfg.Backends.Anthropic.BaseURL + "/v1/messages"
-		reqBody, _ = claude.Convert(unified, model)
+		reqBody, err = claude.Convert(unified, model)
 	case "gemini":
 		backendURL = s.cfg.Backends.Gemini.BaseURL + "/models/" + model + ":generateContent"
-		reqBody, _ = gemini.Convert(unified, model)
-		backendURL = backendURL + "?key=" + route.BackendKey
+		reqBody, err = gemini.Convert(unified, model)
+		if err == nil {
+			backendURL = backendURL + "?key=" + route.BackendKey
+		}
 	default:
 		s.writeError(w, http.StatusBadRequest, "Unknown backend")
+		return
+	}
+
+	if err != nil {
+		s.log.Error("Protocol conversion failed",
+			logger.LogField{Key: "backend", Value: route.Backend},
+			logger.LogField{Key: "error", Value: err.Error()},
+		)
+		s.writeOpenAIError(w, http.StatusInternalServerError, "Failed to convert protocol")
 		return
 	}
 
@@ -347,7 +357,7 @@ func (s *Server) serveOpenAIRequest(w http.ResponseWriter, r *http.Request) {
 
 	// 处理响应
 	if unified.Stream {
-		s.handleOpenAIStream(w, resp, route.Backend, connReused)
+		s.handleOpenAIStream(w, resp, route.Backend, connReused, r)
 	} else {
 		s.handleOpenAINonStream(w, resp, route.Backend, latency, start, connReused)
 	}
@@ -467,7 +477,7 @@ func (s *Server) handleOpenAINonStream(w http.ResponseWriter, resp *http.Respons
 }
 
 // handleOpenAIStream 处理 OpenAI 流式响应
-func (s *Server) handleOpenAIStream(w http.ResponseWriter, resp *http.Response, backend string, connReused bool) {
+func (s *Server) handleOpenAIStream(w http.ResponseWriter, resp *http.Response, backend string, connReused bool, req *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -478,19 +488,21 @@ func (s *Server) handleOpenAIStream(w http.ResponseWriter, resp *http.Response, 
 		logger.LogField{Key: "conn_reused", Value: connReused},
 	)
 
-	// 检测客户端断开连接
-	var clientDisconnected bool
-	if notifier, ok := w.(http.CloseNotifier); ok {
-		go func() {
-			<-notifier.CloseNotify()
-			clientDisconnected = true
-		}()
-	}
+	// 检测客户端断开连接（使用 context 替代已弃用的 http.CloseNotifier）
+	clientDisconnected := make(chan struct{})
+	go func() {
+		select {
+		case <-req.Context().Done():
+			close(clientDisconnected)
+		}
+	}()
 
 	// 流式解析并转换为 OpenAI SSE 格式
 	stream.ParseSSE(resp.Body, func(event string, data []byte) {
-		if clientDisconnected {
+		select {
+		case <-clientDisconnected:
 			return
+		default:
 		}
 
 		var openaiData []byte
@@ -519,22 +531,25 @@ func (s *Server) handleOpenAIStream(w http.ResponseWriter, resp *http.Response, 
 
 // convertAnthropicSSEToOpenAI 转换 Anthropic SSE 为 OpenAI 格式
 func convertAnthropicSSEToOpenAI(event string, data []byte) []byte {
-	// Anthropic SSE 事件类型：content_block_delta, content_block_stop, message_stop
-	// OpenAI SSE 格式：{"delta": {"content": "..."}, "finish_reason": null}
-
 	if event == "message_stop" {
 		return []byte(`data: {"choices":[{"delta":{},"finish_reason":"stop"}]}`)
 	}
 
 	if event == "content_block_delta" {
-		// 解析 Anthropic delta
 		var delta struct {
 			Delta struct {
 				Text string `json:"text"`
 			} `json:"delta"`
 		}
 		if err := json.Unmarshal(data, &delta); err == nil && delta.Delta.Text != "" {
-			return []byte(fmt.Sprintf(`data: {"choices":[{"delta":{"content":"%s"},"finish_reason":null}]}`, delta.Delta.Text))
+			// 使用 json.Marshal 避免 JSON 注入（文本中包含引号、换行等特殊字符）
+			payload := map[string]interface{}{
+				"choices": []map[string]interface{}{
+					{"delta": map[string]interface{}{"content": delta.Delta.Text}, "finish_reason": nil},
+				},
+			}
+			result, _ := json.Marshal(payload)
+			return append([]byte("data: "), result...)
 		}
 	}
 
@@ -543,8 +558,6 @@ func convertAnthropicSSEToOpenAI(event string, data []byte) []byte {
 
 // convertGeminiSSEToOpenAI 转换 Gemini SSE 为 OpenAI 格式
 func convertGeminiSSEToOpenAI(event string, data []byte) []byte {
-	// Gemini SSE 格式：{"candidates": [{"content": {"parts": [{"text": "..."}]}}]}
-
 	var geminiResp struct {
 		Candidates []struct {
 			Content struct {
@@ -574,10 +587,24 @@ func convertGeminiSSEToOpenAI(event string, data []byte) []byte {
 		}
 
 		if text != "" {
-			return []byte(fmt.Sprintf(`data: {"choices":[{"delta":{"content":"%s"},"finish_reason":null}]}`, text))
+			// 使用 json.Marshal 避免 JSON 注入
+			payload := map[string]interface{}{
+				"choices": []map[string]interface{}{
+					{"delta": map[string]interface{}{"content": text}, "finish_reason": nil},
+				},
+			}
+			result, _ := json.Marshal(payload)
+			return append([]byte("data: "), result...)
 		}
 		if finishReason != "" {
-			return []byte(fmt.Sprintf(`data: {"choices":[{"delta":{},"finish_reason":"%s"}]}`, openaiFinishReason))
+			// 使用 json.Marshal 避免 JSON 注入
+			payload := map[string]interface{}{
+				"choices": []map[string]interface{}{
+					{"delta": map[string]interface{}{}, "finish_reason": openaiFinishReason},
+				},
+			}
+			result, _ := json.Marshal(payload)
+			return append([]byte("data: "), result...)
 		}
 	}
 
@@ -606,10 +633,15 @@ func (s *Server) writeOpenAIError(w http.ResponseWriter, code int, message strin
 		} `json:"error"`
 	}
 
+	errType := errorCodeMap[code]
+	if errType == "" {
+		errType = "internal_server_error"
+	}
+
 	err := OpenAIError{}
 	err.Error.Message = message
-	err.Error.Type = errorCodeMap[code]
-	err.Error.Code = errorCodeMap[code]
+	err.Error.Type = errType
+	err.Error.Code = errType
 
 	json.NewEncoder(w).Encode(err)
 }
