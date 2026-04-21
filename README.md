@@ -543,7 +543,21 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ## 版本升级
 
-### v0.4.2 → v0.5.0（最新）
+### v0.5.0 → v0.5.1（最新）
+
+**无破坏性变更** - 配置完全向后兼容。
+
+**修复：**
+- Gemini 后端不支持 `system`/`developer` 角色的问题
+  - 自动映射 `system` → `user`、`assistant` → `model`
+  - OpenClaw system prompt 可正常使用
+
+**升级步骤：**
+1. 停止旧版本服务
+2. 部署 v0.5.1 二进制文件或 Docker 镜像
+3. 重启服务（`config.yaml` 无需修改）
+
+### v0.4.2 → v0.5.0
 
 **无破坏性变更** - 配置完全向后兼容。
 

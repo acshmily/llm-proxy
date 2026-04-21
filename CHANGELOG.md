@@ -5,6 +5,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.5.1] - 2026-04-21
+
+### 修复
+- **兼容性**: OpenAI `system`/`developer`/`tool` 角色不被 Gemini 支持
+  - 新增 `mapToGeminiRole` 函数自动映射角色
+  - `system`/`developer`/`tool` → `user`
+  - `assistant` → `model`
+  - 解决 OpenClaw 发送 system prompt 时返回 "Role 'system' is not supported" 错误
+
+---
+
 ## [0.5.0] - 2026-04-21
 
 ### 新增
