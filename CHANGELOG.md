@@ -5,6 +5,16 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.4.2] - 2026-04-21
+
+### 修复
+- **缺陷**: Gemini `ParseResponse` 硬编码模型名为 `"gemini-pro"`
+  - 客户端请求 `gemini-2.5-flash` 时返回错误模型名
+  - 改为接收 `model` 参数透传，确保响应中的模型名与请求一致
+- **内部接口**: `gemini.ParseResponse` 签名变更（`data []byte` → `data []byte, model string`）
+
+---
+
 ## [0.4.1] - 2026-04-21
 
 ### 修复

@@ -127,6 +127,26 @@ func TestParseResponse(t *testing.T) {
 		}
 	})
 
+	t.Run("model parameter propagation", func(t *testing.T) {
+		input := `{
+			"candidates": [{
+				"content": {
+					"parts": [{"text": "response"}]
+				}
+			}]
+		}`
+
+		for _, model := range []string{"gemini-2.5-flash", "gemini-2.0-pro", "gemini-pro"} {
+			resp, err := ParseResponse([]byte(input), model)
+			if err != nil {
+				t.Fatalf("ParseResponse failed for %s: %v", model, err)
+			}
+			if resp.Model != model {
+				t.Errorf("Expected model '%s', got '%s'", model, resp.Model)
+			}
+		}
+	})
+
 	t.Run("invalid JSON", func(t *testing.T) {
 		// Important: 测试无效 JSON 输入
 		_, err := ParseResponse([]byte(`{invalid json}`), "gemini-pro")
