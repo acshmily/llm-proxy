@@ -208,6 +208,53 @@ curl http://localhost:8080/v1/chat/completions \
 - 两种协议可以混合使用，路由配置无需修改
 - 模型名直接透传到后端，无需映射配置
 
+### OpenClaw 接入
+
+OpenClaw 使用 OpenAI 兼容协议时，配置方式如下：
+
+```json
+{
+  "models": {
+    "providers": {
+      "llmproxy": {
+        "baseUrl": "https://your-domain.com",
+        "apiKey": "sk-client-1",
+        "api": "openai-completions"
+      }
+    }
+  }
+}
+```
+
+设置默认模型：
+
+```json
+{
+  "models": {
+    "model": "llmproxy/gemini-2.5-flash"
+  }
+}
+```
+
+或通过 CLI 设置：
+
+```bash
+openclaw models set llmproxy/gemini-2.5-flash
+```
+
+**Nginx 路径注意事项：**
+
+如果你的代理部署在 Nginx 子路径下（如 `/bigbird`），确保 Nginx 配置中 `proxy_pass` 末尾有 `/`，以自动剥离前缀：
+
+```nginx
+location ^~ /bigbird/ {
+    proxy_pass http://llm_proxy_backend/;  # 末尾的 / 很重要
+    # ... 其他配置
+}
+```
+
+OpenClaw 会自动拼接 `{baseUrl}/v1/chat/completions`，配合 Nginx 路径重写后，后端实际收到的路径为 `/v1/chat/completions`。
+
 ## 支持的后端
 
 | 后端名称 | 配置值 | API 端点 | 说明 |
