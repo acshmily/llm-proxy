@@ -18,6 +18,7 @@ func TestMapToGeminiRole(t *testing.T) {
 		{"assistant", "model"},
 		{"user", "user"},
 		{"model", "model"},
+		{"tool_result", "tool_result"}, // unknown role passthrough
 	}
 
 	for _, tt := range tests {

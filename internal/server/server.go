@@ -840,31 +840,43 @@ func (s *Server) serveModelsList(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if bq.name == "gemini" {
-				if err := json.Unmarshal(body, &geminiModels); err == nil {
-					mu.Lock()
-					for _, m := range geminiModels.Models {
-						// Gemini 返回格式: "models/gemini-2.5-flash"
-						id := m.Name
-						if len(id) > 7 && id[:7] == "models/" {
-							id = id[7:]
-						}
-						allModels = append(allModels, modelInfo{
-							ID:      id,
-							Object:  "model",
-							Created: time.Now().Unix(),
-							OwnedBy: bq.ownedBy,
-						})
-					}
-					mu.Unlock()
+				if err := json.Unmarshal(body, &geminiModels); err != nil {
+					s.log.Error("Failed to parse models from Gemini backend",
+						logger.LogField{Key: "backend", Value: bq.name},
+						logger.LogField{Key: "error", Value: err.Error()},
+					)
+					return
 				}
-			} else if err := json.Unmarshal(body, &backendModels); err == nil {
+				mu.Lock()
+				for _, m := range geminiModels.Models {
+					// Gemini 返回格式: "models/gemini-2.5-flash"
+					id := m.Name
+					if len(id) > 7 && id[:7] == "models/" {
+						id = id[7:]
+					}
+					allModels = append(allModels, modelInfo{
+						ID:      id,
+						Object:  "model",
+						Created: time.Now().Unix(),
+						OwnedBy: bq.ownedBy,
+					})
+				}
+				mu.Unlock()
+			} else {
+				if err := json.Unmarshal(body, &backendModels); err != nil {
+					s.log.Error("Failed to parse models from backend",
+						logger.LogField{Key: "backend", Value: bq.name},
+						logger.LogField{Key: "error", Value: err.Error()},
+					)
+					return
+				}
 				mu.Lock()
 				for _, m := range backendModels.Data {
 					allModels = append(allModels, modelInfo{
 						ID:      m.ID,
 						Object:  "model",
 						Created: m.Created,
-						OwnedBy: m.OwnedBy,
+						OwnedBy: bq.ownedBy,
 					})
 				}
 				mu.Unlock()
