@@ -662,3 +662,56 @@ data: {"candidates":[{"content":{"parts":[{}]},"finishReason":"STOP"}]}
 	assert.Equal(t, http.StatusOK, rr.Code)
 	assert.Contains(t, rr.Body.String(), "content")
 }
+
+func TestServer_MessagesRequest_GeminiStreaming(t *testing.T) {
+	// 验证 /v1/messages（Anthropic 协议）的 Gemini 流式也使用正确端点
+	var receivedPath string
+	var receivedQuery string
+	mockBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		receivedQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`data: {"candidates":[{"content":{"parts":[{"text":"Hi"}]},"finishReason":""}]}
+
+data: {"candidates":[{"content":{"parts":[{}]},"finishReason":"STOP"}]}
+
+`))
+	}))
+	defer mockBackend.Close()
+
+	cfg := &config.Config{
+		Routes: []config.RouteConfig{{
+			APIKey:      "sk-test-key",
+			Backend:     "gemini",
+			BackendKey:  "gemini-test-key",
+			Timeout:     30000000000,
+		}},
+		Backends: config.BackendsConfig{
+			Gemini: config.BackendConfig{BaseURL: mockBackend.URL},
+		},
+	}
+
+	r := router.New(cfg.Routes)
+	log := logger.New(logger.TEXT, logger.INFO)
+	srv := New(cfg, r, log)
+
+	// Anthropic 协议请求（content 是数组格式）
+	reqBody := []byte(`{
+		"model": "gemini-pro",
+		"messages": [{"role": "user", "content": [{"type": "text", "text": "Hi"}]}],
+		"stream": true,
+		"max_tokens": 100
+	}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(reqBody))
+	req.Header.Set("x-api-key", "sk-test-key")
+	req.Header.Set("Content-Type", "application/json")
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	assert.Contains(t, receivedPath, ":streamGenerateContent", "/v1/messages should also use streamGenerateContent for streaming")
+	assert.Contains(t, receivedQuery, "alt=sse", "/v1/messages should also request SSE format")
+	assert.Equal(t, http.StatusOK, rr.Code)
+}

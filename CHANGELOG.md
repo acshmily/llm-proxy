@@ -8,18 +8,21 @@
 ## [0.6.1] - 2026-04-21
 
 ### 修复
-- **兼容性**: `/v1/completions` 端点不支持 `messages` 数组格式
+- **兼容性**: `/v1/completions` 端点新增 `messages` 数组格式支持
   - OpenClaw `openai-completions` 模式发送 `messages` 数组而非 `prompt` 字段
-  - 新增同时解析 `prompt` 和 `messages` 两种输入格式
+  - 同时解析 `prompt` 和 `messages` 两种输入格式
   - `prompt` 存在时优先使用，否则使用 `messages` 数组
-  - 新增 4 个测试用例覆盖 messages 格式场景
 - **流式响应**: Gemini 后端流式请求返回空数据
-  - 流式请求使用 `:streamGenerateContent` 端点（非 `:generateContent`）
-  - 同时修复 `/v1/completions` 和 `/v1/chat/completions` 两个端点
+  - `streamGenerateContent` 默认返回 NDJSON 格式（无 `data:` 前缀）
+  - 添加 `?alt=sse` 参数请求标准 SSE 格式
+  - 修复 `/v1/messages`、`/v1/completions` 和 `/v1/chat/completions` 三个端点
   - 解决 OpenClaw 默认流式调用无数据的问题
 - **健壮性**: 空输入校验
   - 当 `prompt` 和 `messages` 均为空时返回 400 错误（此前透传后端 502）
   - 更新 `EmptyPrompt` 测试预期行为
+
+### 测试
+- 新增 7 个测试用例覆盖双格式解析、优先级、输入校验和流式场景
 
 ---
 

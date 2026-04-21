@@ -199,10 +199,12 @@ func (s *Server) serveRequest(w http.ResponseWriter, r *http.Request) {
 		backendURL = s.cfg.Backends.Anthropic.BaseURL + "/v1/messages"
 		reqBody, _ = claude.Convert(unified, model)
 	case "gemini":
-		backendURL = s.cfg.Backends.Gemini.BaseURL + "/models/" + model + ":generateContent"
+		if unified.Stream {
+			backendURL = s.cfg.Backends.Gemini.BaseURL + "/models/" + model + ":streamGenerateContent?alt=sse&key=" + route.BackendKey
+		} else {
+			backendURL = s.cfg.Backends.Gemini.BaseURL + "/models/" + model + ":generateContent?key=" + route.BackendKey
+		}
 		reqBody, _ = gemini.Convert(unified, model)
-		// Gemini 使用 URL 参数 key= 而非 Bearer Token
-		backendURL = backendURL + "?key=" + route.BackendKey
 	default:
 		s.writeError(w, http.StatusBadRequest, "Unknown backend")
 		return
