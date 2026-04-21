@@ -5,6 +5,16 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.5.2] - 2026-04-21
+
+### 修复
+- **兼容性**: `/v1/models` 端点查询 OpenAI/Anthropic 后端时返回 401
+  - OpenAI 后端添加 `Authorization: Bearer` Header
+  - Anthropic 后端添加 `x-api-key` Header
+  - 新增认证 Header 测试用例
+
+---
+
 ## [0.5.1] - 2026-04-21
 
 ### 修复

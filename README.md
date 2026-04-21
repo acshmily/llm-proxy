@@ -543,7 +543,21 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ## 版本升级
 
-### v0.5.0 → v0.5.1（最新）
+### v0.5.1 → v0.5.2（最新）
+
+**无破坏性变更** - 配置完全向后兼容。
+
+**修复：**
+- `/v1/models` 端点查询后端时 401 认证错误问题
+  - OpenAI 后端添加 Bearer token
+  - Anthropic 后端添加 x-api-key
+
+**升级步骤：**
+1. 停止旧版本服务
+2. 部署 v0.5.2 二进制文件或 Docker 镜像
+3. 重启服务（`config.yaml` 无需修改）
+
+### v0.5.0 → v0.5.1
 
 **无破坏性变更** - 配置完全向后兼容。
 
