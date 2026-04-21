@@ -5,6 +5,19 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.4.1] - 2026-04-21
+
+### 修复
+- **安全**: SSE 流式转换中的 JSON 注入漏洞
+  - 使用 `json.Marshal` 替代 `fmt.Sprintf` 构造 SSE 响应
+  - 防止 AI 输出中的引号、换行等字符破坏 JSON 格式
+- **安全**: 协议转换错误被静默丢弃
+  - 转换失败时返回客户端明确的错误响应并记录日志
+- **兼容**: 使用 `http.Request.Context()` 替代已弃用的 `http.CloseNotifier`
+- **健壮性**: 未映射 HTTP 状态码产生空错误字段的问题
+
+---
+
 ## [0.4.0] - 2026-04-16
 
 ### 新增
