@@ -246,7 +246,7 @@ func (s *Server) serveRequest(w http.ResponseWriter, r *http.Request) {
 	if unified.Stream {
 		s.handleStream(w, resp, route.Backend, connReused)
 	} else {
-		s.handleNonStream(w, resp, route.Backend, latency, start, connReused)
+		s.handleNonStream(w, resp, route.Backend, model, latency, start, connReused)
 	}
 }
 
@@ -359,7 +359,7 @@ func (s *Server) serveOpenAIRequest(w http.ResponseWriter, r *http.Request) {
 	if unified.Stream {
 		s.handleOpenAIStream(w, resp, route.Backend, connReused, r)
 	} else {
-		s.handleOpenAINonStream(w, resp, route.Backend, latency, start, connReused)
+		s.handleOpenAINonStream(w, resp, route.Backend, model, latency, start, connReused)
 	}
 }
 
@@ -383,7 +383,7 @@ func (s *Server) handleStream(w http.ResponseWriter, resp *http.Response, backen
 	})
 }
 
-func (s *Server) handleNonStream(w http.ResponseWriter, resp *http.Response, backend string, latency int64, start time.Time, connReused bool) {
+func (s *Server) handleNonStream(w http.ResponseWriter, resp *http.Response, backend string, model string, latency int64, start time.Time, connReused bool) {
 	body, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
@@ -401,7 +401,7 @@ func (s *Server) handleNonStream(w http.ResponseWriter, resp *http.Response, bac
 	case "anthropic":
 		unified, err = claude.ParseResponse(body)
 	case "gemini":
-		unified, err = gemini.ParseResponse(body)
+		unified, err = gemini.ParseResponse(body, model)
 	}
 
 	if err != nil {
@@ -429,7 +429,7 @@ func (s *Server) handleNonStream(w http.ResponseWriter, resp *http.Response, bac
 }
 
 // handleOpenAINonStream 处理 OpenAI 非流式响应
-func (s *Server) handleOpenAINonStream(w http.ResponseWriter, resp *http.Response, backend string, latency int64, start time.Time, connReused bool) {
+func (s *Server) handleOpenAINonStream(w http.ResponseWriter, resp *http.Response, backend string, model string, latency int64, start time.Time, connReused bool) {
 	body, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
@@ -448,7 +448,7 @@ func (s *Server) handleOpenAINonStream(w http.ResponseWriter, resp *http.Respons
 	case "anthropic":
 		unified, err = claude.ParseResponse(body)
 	case "gemini":
-		unified, err = gemini.ParseResponse(body)
+		unified, err = gemini.ParseResponse(body, model)
 	}
 
 	if err != nil {

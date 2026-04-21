@@ -34,7 +34,7 @@ func Convert(um *types.UnifiedMessage, modelOverride string) ([]byte, error) {
 }
 
 // ParseResponse 解析 Gemini 响应
-func ParseResponse(data []byte) (*types.UnifiedResponse, error) {
+func ParseResponse(data []byte, model string) (*types.UnifiedResponse, error) {
 	var resp GeminiResponse
 	if err := json.Unmarshal(data, &resp); err != nil {
 		return nil, err
@@ -53,7 +53,7 @@ func ParseResponse(data []byte) (*types.UnifiedResponse, error) {
 
 	return &types.UnifiedResponse{
 		ID:           fmt.Sprintf("gemini-%d", len(resp.Candidates)),
-		Model:        "gemini-pro",
+		Model:        model,
 		Content:      content,
 		Role:         "assistant",
 		FinishReason: finishReason,

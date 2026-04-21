@@ -79,7 +79,7 @@ func TestParseResponse(t *testing.T) {
 			}]
 		}`
 
-		resp, err := ParseResponse([]byte(input))
+		resp, err := ParseResponse([]byte(input), "gemini-pro")
 		if err != nil {
 			t.Fatalf("ParseResponse failed: %v", err)
 		}
@@ -98,7 +98,7 @@ func TestParseResponse(t *testing.T) {
 	t.Run("empty response", func(t *testing.T) {
 		input := `{"candidates": []}`
 
-		resp, err := ParseResponse([]byte(input))
+		resp, err := ParseResponse([]byte(input), "gemini-pro")
 		if err != nil {
 			t.Fatalf("ParseResponse failed: %v", err)
 		}
@@ -117,7 +117,7 @@ func TestParseResponse(t *testing.T) {
 			}]
 		}`
 
-		resp, err := ParseResponse([]byte(input))
+		resp, err := ParseResponse([]byte(input), "gemini-pro")
 		if err != nil {
 			t.Fatalf("ParseResponse failed: %v", err)
 		}
@@ -129,7 +129,7 @@ func TestParseResponse(t *testing.T) {
 
 	t.Run("invalid JSON", func(t *testing.T) {
 		// Important: 测试无效 JSON 输入
-		_, err := ParseResponse([]byte(`{invalid json}`))
+		_, err := ParseResponse([]byte(`{invalid json}`), "gemini-pro")
 		if err == nil {
 			t.Error("Expected error for invalid JSON")
 		}
