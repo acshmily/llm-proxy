@@ -303,11 +303,12 @@ func (s *Server) serveOpenAIRequest(w http.ResponseWriter, r *http.Request) {
 		backendURL = s.cfg.Backends.Anthropic.BaseURL + "/v1/messages"
 		reqBody, err = claude.Convert(unified, model)
 	case "gemini":
-		backendURL = s.cfg.Backends.Gemini.BaseURL + "/models/" + model + ":generateContent"
-		reqBody, err = gemini.Convert(unified, model)
-		if err == nil {
-			backendURL = backendURL + "?key=" + route.BackendKey
+		if unified.Stream {
+			backendURL = s.cfg.Backends.Gemini.BaseURL + "/models/" + model + ":streamGenerateContent?alt=sse&key=" + route.BackendKey
+		} else {
+			backendURL = s.cfg.Backends.Gemini.BaseURL + "/models/" + model + ":generateContent?key=" + route.BackendKey
 		}
+		reqBody, err = gemini.Convert(unified, model)
 	default:
 		s.writeError(w, http.StatusBadRequest, "Unknown backend")
 		return
@@ -392,30 +393,52 @@ func (s *Server) serveCompletionsRequest(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// 解析 Completions 格式（prompt 字段），转换为统一格式
-	var completionsReq struct {
-		Model       string  `json:"model"`
-		Prompt      string  `json:"prompt"`
-		Stream      bool    `json:"stream"`
-		MaxTokens   int     `json:"max_tokens"`
-		Temperature float64 `json:"temperature"`
-		TopP        float64 `json:"top_p"`
+	// 解析请求，兼容 prompt 和 messages 两种格式
+	type rawMsg struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	}
+	var rawRequest struct {
+		Model       string   `json:"model"`
+		Prompt      string   `json:"prompt"`
+		Messages    []rawMsg `json:"messages"`
+		Stream      bool     `json:"stream"`
+		MaxTokens   int      `json:"max_tokens"`
+		Temperature float64  `json:"temperature"`
+		TopP        float64  `json:"top_p"`
 		Stop        []string `json:"stop"`
 	}
-	if err := json.Unmarshal(body, &completionsReq); err != nil {
+	if err := json.Unmarshal(body, &rawRequest); err != nil {
 		s.writeError(w, http.StatusBadRequest, "Invalid request format")
 		return
 	}
 
 	// 转换为统一消息格式
+	var messages []types.MessageRole
+	if rawRequest.Prompt != "" {
+		// prompt 格式：包装为单条 user 消息
+		messages = []types.MessageRole{{Role: "user", Content: rawRequest.Prompt}}
+	} else if len(rawRequest.Messages) > 0 {
+		// messages 格式：直接使用
+		messages = make([]types.MessageRole, len(rawRequest.Messages))
+		for i, msg := range rawRequest.Messages {
+			messages[i] = types.MessageRole{Role: msg.Role, Content: msg.Content}
+		}
+	}
+
+	if len(messages) == 0 {
+		s.writeError(w, http.StatusBadRequest, "Either 'prompt' or 'messages' must be provided")
+		return
+	}
+
 	unified := &types.UnifiedMessage{
-		Model:    completionsReq.Model,
-		Stream:   completionsReq.Stream,
-		Messages: []types.MessageRole{{Role: "user", Content: completionsReq.Prompt}},
-		MaxTokens: completionsReq.MaxTokens,
-		Temperature: completionsReq.Temperature,
-		TopP:     completionsReq.TopP,
-		StopSequences: completionsReq.Stop,
+		Model:    rawRequest.Model,
+		Stream:   rawRequest.Stream,
+		Messages: messages,
+		MaxTokens: rawRequest.MaxTokens,
+		Temperature: rawRequest.Temperature,
+		TopP:     rawRequest.TopP,
+		StopSequences: rawRequest.Stop,
 	}
 
 	// 复用现有后端处理逻辑
@@ -435,11 +458,12 @@ func (s *Server) serveCompletionsRequest(w http.ResponseWriter, r *http.Request)
 		backendURL = s.cfg.Backends.Anthropic.BaseURL + "/v1/messages"
 		reqBody, err = claude.Convert(unified, model)
 	case "gemini":
-		backendURL = s.cfg.Backends.Gemini.BaseURL + "/models/" + model + ":generateContent"
-		reqBody, err = gemini.Convert(unified, model)
-		if err == nil {
-			backendURL = backendURL + "?key=" + route.BackendKey
+		if unified.Stream {
+			backendURL = s.cfg.Backends.Gemini.BaseURL + "/models/" + model + ":streamGenerateContent?alt=sse&key=" + route.BackendKey
+		} else {
+			backendURL = s.cfg.Backends.Gemini.BaseURL + "/models/" + model + ":generateContent?key=" + route.BackendKey
 		}
+		reqBody, err = gemini.Convert(unified, model)
 	default:
 		s.writeError(w, http.StatusBadRequest, "Unknown backend")
 		return

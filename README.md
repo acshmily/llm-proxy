@@ -211,7 +211,29 @@ curl http://localhost:8080/v1/chat/completions \
 
 ### OpenClaw 接入
 
-OpenClaw 使用 OpenAI 兼容协议时，配置方式如下：
+OpenClaw 支持两种 API 模式，均可通过本代理对接：
+
+#### 模式一：`openai-chat`（推荐）
+
+使用 OpenAI Chat Completions API（`/v1/chat/completions`），功能完整：
+
+```json
+{
+  "models": {
+    "providers": {
+      "llmproxy": {
+        "baseUrl": "https://your-domain.com",
+        "apiKey": "sk-client-1",
+        "api": "openai-chat"
+      }
+    }
+  }
+}
+```
+
+#### 模式二：`openai-completions`
+
+使用旧版 OpenAI Completions API（`/v1/completions`），代理自动转换为 Chat 格式转发到后端：
 
 ```json
 {
@@ -254,7 +276,7 @@ location ^~ /bigbird/ {
 }
 ```
 
-OpenClaw 会自动拼接 `{baseUrl}/v1/chat/completions`，配合 Nginx 路径重写后，后端实际收到的路径为 `/v1/chat/completions`。
+OpenClaw 会自动拼接 `{baseUrl}/v1/chat/completions` 或 `{baseUrl}/v1/completions`，配合 Nginx 路径重写后，后端实际收到的路径为对应端点。
 
 ## 支持的后端
 
@@ -544,7 +566,21 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ## 版本升级
 
-### v0.5.3 → v0.6.0（最新）
+### v0.6.0 → v0.6.1（最新）
+
+**无破坏性变更** - 配置完全向后兼容。
+
+**修复：**
+- `/v1/completions` 端点新增 `messages` 数组格式支持
+  - OpenClaw `openai-completions` 模式发送 `messages` 数组而非 `prompt`
+  - 同时兼容 `prompt` 和 `messages` 两种输入格式
+
+**升级步骤：**
+1. 停止旧版本服务
+2. 部署 v0.6.1 二进制文件或 Docker 镜像
+3. 重启服务（`config.yaml` 无需修改）
+
+### v0.5.3 → v0.6.0
 
 **无破坏性变更** - 配置完全向后兼容。
 

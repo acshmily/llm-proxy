@@ -5,6 +5,24 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.6.1] - 2026-04-21
+
+### 修复
+- **兼容性**: `/v1/completions` 端点不支持 `messages` 数组格式
+  - OpenClaw `openai-completions` 模式发送 `messages` 数组而非 `prompt` 字段
+  - 新增同时解析 `prompt` 和 `messages` 两种输入格式
+  - `prompt` 存在时优先使用，否则使用 `messages` 数组
+  - 新增 4 个测试用例覆盖 messages 格式场景
+- **流式响应**: Gemini 后端流式请求返回空数据
+  - 流式请求使用 `:streamGenerateContent` 端点（非 `:generateContent`）
+  - 同时修复 `/v1/completions` 和 `/v1/chat/completions` 两个端点
+  - 解决 OpenClaw 默认流式调用无数据的问题
+- **健壮性**: 空输入校验
+  - 当 `prompt` 和 `messages` 均为空时返回 400 错误（此前透传后端 502）
+  - 更新 `EmptyPrompt` 测试预期行为
+
+---
+
 ## [0.6.0] - 2026-04-21
 
 ### 新增
