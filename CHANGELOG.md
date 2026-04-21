@@ -5,6 +5,18 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.6.0] - 2026-04-21
+
+### 新增
+- **OpenAI Completions API 支持**
+  - 新增 `POST /v1/completions` 端点
+  - 兼容旧版 OpenAI Completions 格式（`prompt` 字段替代 `messages`）
+  - 响应转换为 `choices[].text` 格式（非 `choices[].message.content`）
+  - 支持 OpenAI/Anthropic/Gemini 三种后端
+  - 支持流式响应（SSE 格式转换）
+
+---
+
 ## [0.5.3] - 2026-04-21
 
 ### 修复

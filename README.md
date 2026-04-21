@@ -145,6 +145,7 @@ curl http://localhost:8080/health
 |------|------|
 | `POST /v1/messages` | 聊天完成（Anthropic 协议，支持流式） |
 | `POST /v1/chat/completions` | 聊天完成（OpenAI 协议，支持流式） |
+| `POST /v1/completions` | 文本生成（OpenAI 旧版 Completions API，支持流式） |
 | `GET /v1/models` | 获取模型列表（聚合所有后端） |
 | `POST /v1/messages/count_tokens` | Token 计数 |
 
@@ -543,7 +544,21 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ## 版本升级
 
-### v0.5.2 → v0.5.3（最新）
+### v0.5.3 → v0.6.0（最新）
+
+**无破坏性变更** - 配置完全向后兼容。
+
+**新增功能：**
+- `POST /v1/completions` 端点（OpenAI 旧版 Completions API）
+- 兼容 OpenClaw `openai-completions` 模式
+- 支持流式响应
+
+**升级步骤：**
+1. 停止旧版本服务
+2. 部署 v0.6.0 二进制文件或 Docker 镜像
+3. 重启服务（`config.yaml` 无需修改）
+
+### v0.5.2 → v0.5.3
 
 **无破坏性变更** - 配置完全向后兼容。
 
