@@ -5,6 +5,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.5.0] - 2026-04-21
+
+### 新增
+- **模型列表端点**
+  - 新增 `GET /v1/models` 端点（OpenAI 兼容格式）
+  - 并发查询所有已配置后端（OpenAI/Anthropic/Gemini）
+  - 合并返回统一模型列表，部分后端不可达时不影响其他结果
+  - OpenClaw 可通过此端点正常获取可用模型
+
+---
+
 ## [0.4.2] - 2026-04-21
 
 ### 修复
