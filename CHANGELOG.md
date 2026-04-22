@@ -5,6 +5,16 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.7.6] - 2026-04-22
+
+### 修复
+- **OpenAI→Gemini 角色交替违规**: 当 `system`/`developer` 角色映射为 `user` 时，
+  连续的同角色消息导致 Gemini API 返回 400 错误
+  - 添加 `mergeConsecutiveSameRoles()` 在转换前合并连续相同 Gemini 角色的消息
+  - OpenClaw embedded agent 发送 `system` + `user` 开头消息时触发此问题
+
+---
+
 ## [0.7.5] - 2026-04-22
 
 ### 修复
