@@ -7,6 +7,8 @@ server:
 logging:
   format: json
   level: info
+  debug_requests: false  # 开启后记录请求/响应体（DEBUG级别）
+  debug_max_body: 1024   # 请求/响应体日志最大字节数
 
 routes:
   # 转发到 OpenAI

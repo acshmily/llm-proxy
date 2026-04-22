@@ -69,6 +69,8 @@ server:
 logging:
   format: json
   level: info
+  debug_requests: false  # 开启后记录请求/响应体（DEBUG级别）
+  debug_max_body: 1024   # 请求/响应体日志最大字节数
 
 routes:
   - api_key: "sk-client-1"
@@ -329,13 +331,31 @@ backends:
 - **路由表认证** - 不同客户端 Key 路由到不同后端
 - **流式转发** - SSE 低延迟转发
 - **连接池** - HTTP 连接复用
-- **结构化日志** - JSON 格式，包含延迟、状态码、Token 数
+- **结构化日志** - JSON 格式，包含延迟、状态码、Token 数，支持请求/响应体调试日志
 - **自动重试** - 对 429/503/504 错误自动重试
 - **多平台支持** - Linux、macOS、Windows，AMD64/ARM64 架构
 - **防护机制** - 三层防护避免 GFW 和网络行为特征扫描
   - 流量伪装：TLS 指纹模拟、浏览器头部模拟
   - 行为打散：请求延迟、连接复用打散、请求填充
   - 流量混淆：WebSocket 隧道、请求分片（已实现）
+
+## 调试日志
+
+开发调试时，可以开启请求/响应体的日志记录，便于排查协议转换和兼容性问题：
+
+```yaml
+logging:
+  level: debug           # 日志级别设为 debug
+  debug_requests: true   # 开启请求/响应体日志
+  debug_max_body: 1024   # 单条日志最多输出 1024 字节，超出截断
+```
+
+开启后，日志会输出：
+- 所有端点的请求体内容（`/v1/messages`、`/v1/chat/completions`、`/v1/completions`）
+- 所有端点的响应体内容
+- 超出 `debug_max_body` 时自动截断，标记总字节数
+
+**注意：** 生产环境建议关闭 `debug_requests`，避免日志泄露敏感内容。
 
 ## 防护机制
 
