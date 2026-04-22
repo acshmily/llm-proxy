@@ -117,3 +117,63 @@ func TestGeminiEndpoint_NonGeminiBackend(t *testing.T) {
 		t.Errorf("Expected 400 for non-Gemini backend, got %d", w.Code)
 	}
 }
+
+func TestGeminiEndpoint_ForwardsStreamingResponse(t *testing.T) {
+	// Mock Gemini backend returning SSE
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte(`data: {"candidates":[{"content":{"parts":[{"text":"hello"}]}}]}
+
+`))
+		w.Write([]byte(`data: {"candidates":[{"content":{"parts":[{"text":" world"}]}}]}
+
+`))
+		w.Write([]byte(`data: {"candidates":[{"finishReason":"STOP"}]}
+
+`))
+	}))
+	defer backend.Close()
+
+	cfg := &config.Config{
+		Routes: []config.RouteConfig{
+			{APIKey: "sk-test", Backend: "gemini", BackendKey: "gemini-key", Timeout: 30000000000},
+		},
+		Backends: config.BackendsConfig{
+			Gemini: config.BackendConfig{BaseURL: backend.URL},
+		},
+	}
+	srv := New(cfg, router.New(cfg.Routes), logger.New(logger.TEXT, logger.INFO))
+
+	body := `{
+		"contents": [{"role": "user", "parts": [{"text": "hello"}]}]
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-pro:streamGenerateContent?alt=sse", nil)
+	req.Header.Set("Authorization", "Bearer sk-test")
+	req.Header.Set("Content-Type", "application/json")
+	req.Body = io.NopCloser(strings.NewReader(body))
+
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected 200, got %d", w.Code)
+	}
+
+	// Should contain SSE events
+	bodyStr := w.Body.String()
+	if !strings.Contains(bodyStr, "data:") {
+		t.Errorf("Expected SSE response, got: %s", bodyStr)
+	}
+	if !strings.Contains(bodyStr, "hello") {
+		t.Errorf("Expected response body to contain 'hello', got: %s", bodyStr)
+	}
+	if !strings.Contains(bodyStr, " world") {
+		t.Errorf("Expected response body to contain ' world', got: %s", bodyStr)
+	}
+
+	// Should have SSE content type
+	ct := w.Header().Get("Content-Type")
+	if !strings.Contains(ct, "text/event-stream") {
+		t.Errorf("Expected Content-Type text/event-stream, got: %s", ct)
+	}
+}
