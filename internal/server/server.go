@@ -228,6 +228,8 @@ func (s *Server) serveRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.logBackendRequest(backendURL, reqBody)
+
 	// 创建后端请求
 	backendReq, err := http.NewRequest(r.Method, backendURL, bytes.NewReader(reqBody))
 	if err != nil {
@@ -264,6 +266,9 @@ func (s *Server) serveRequest(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 
 	latency := time.Since(start).Milliseconds()
+	respBody, _ := io.ReadAll(resp.Body)
+	s.logBackendResponse(backendURL, respBody, resp.StatusCode)
+	resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
 	// 记录连接复用统计
 	s.poolStats.RecordRequest(connReused)
@@ -345,6 +350,8 @@ func (s *Server) serveOpenAIRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.logBackendRequest(backendURL, reqBody)
+
 	// 创建后端请求
 	backendReq, err := http.NewRequest(r.Method, backendURL, bytes.NewReader(reqBody))
 	if err != nil {
@@ -379,7 +386,13 @@ func (s *Server) serveOpenAIRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	defer resp.Body.Close()
 
+	// 读取后端响应体以便日志记录
 	latency := time.Since(start).Milliseconds()
+	respBody, _ := io.ReadAll(resp.Body)
+	s.logBackendResponse(backendURL, respBody, resp.StatusCode)
+
+	// 重新设置响应体供后续处理
+	resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
 	// 记录连接复用统计
 	s.poolStats.RecordRequest(connReused)
@@ -555,6 +568,8 @@ func (s *Server) serveCompletionsRequest(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	s.logBackendRequest(backendURL, reqBody)
+
 	backendReq, err := http.NewRequest(r.Method, backendURL, bytes.NewReader(reqBody))
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "Failed to create backend request")
@@ -587,6 +602,9 @@ func (s *Server) serveCompletionsRequest(w http.ResponseWriter, r *http.Request)
 	defer resp.Body.Close()
 
 	latency := time.Since(start).Milliseconds()
+	respBody, _ := io.ReadAll(resp.Body)
+	s.logBackendResponse(backendURL, respBody, resp.StatusCode)
+	resp.Body = io.NopCloser(bytes.NewReader(respBody))
 	s.poolStats.RecordRequest(connReused)
 
 	// 处理响应并转换为 Completions 格式
@@ -815,6 +833,8 @@ func (s *Server) serveGeminiRequest(w http.ResponseWriter, r *http.Request) {
 		backendURL += "?key=" + route.BackendKey
 	}
 
+	s.logBackendRequest(backendURL, body)
+
 	// 创建后端请求
 	backendReq, err := http.NewRequest(r.Method, backendURL, bytes.NewReader(body))
 	if err != nil {
@@ -849,6 +869,10 @@ func (s *Server) serveGeminiRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	s.logBackendResponse(backendURL, respBody, resp.StatusCode)
+	resp.Body = io.NopCloser(bytes.NewReader(respBody))
 
 	latency := time.Since(start).Milliseconds()
 
@@ -1548,6 +1572,33 @@ func (s *Server) logResponseBody(path string, body []byte, statusCode int) {
 	truncated, total := truncateBody(body, s.debugMaxBody)
 	s.log.Debug("Response body",
 		logger.LogField{Key: "path", Value: path},
+		logger.LogField{Key: "status", Value: statusCode},
+		logger.LogField{Key: "body", Value: truncated},
+		logger.LogField{Key: "total_bytes", Value: total},
+	)
+}
+
+// logBackendRequest logs the backend request body if debug_requests is enabled.
+func (s *Server) logBackendRequest(url string, body []byte) {
+	if !s.debugRequests || len(body) == 0 {
+		return
+	}
+	truncated, total := truncateBody(body, s.debugMaxBody)
+	s.log.Debug("Backend request",
+		logger.LogField{Key: "url", Value: url},
+		logger.LogField{Key: "body", Value: truncated},
+		logger.LogField{Key: "total_bytes", Value: total},
+	)
+}
+
+// logBackendResponse logs the backend response body if debug_requests is enabled.
+func (s *Server) logBackendResponse(url string, body []byte, statusCode int) {
+	if !s.debugRequests || len(body) == 0 {
+		return
+	}
+	truncated, total := truncateBody(body, s.debugMaxBody)
+	s.log.Debug("Backend response",
+		logger.LogField{Key: "url", Value: url},
 		logger.LogField{Key: "status", Value: statusCode},
 		logger.LogField{Key: "body", Value: truncated},
 		logger.LogField{Key: "total_bytes", Value: total},
