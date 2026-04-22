@@ -811,3 +811,132 @@ func TestServer_CompletionsRequest_MultiPartContent(t *testing.T) {
 	// Verify backend received concatenated content (JSON marshal removes trailing spaces)
 	assert.Contains(t, string(receivedBody), `"text":"Part one. Part two. Part three."`)
 }
+
+func TestServer_CompletionsRequest_WithTools_GeminiBackend(t *testing.T) {
+	// OpenClaw sends tools in completions requests - they must be forwarded to Gemini
+	var receivedBody []byte
+	mockBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"candidates": [{"content": {"parts": [{"text": "OK"}], "role": "model"}, "finishReason": "STOP"}]}`))
+	}))
+	defer mockBackend.Close()
+
+	cfg := &config.Config{
+		Routes: []config.RouteConfig{{
+			APIKey:      "sk-test-key",
+			Backend:     "gemini",
+			BackendKey:  "gemini-key",
+			Timeout:     30000000000,
+		}},
+		Backends: config.BackendsConfig{
+			Gemini: config.BackendConfig{BaseURL: mockBackend.URL},
+		},
+	}
+
+	r := router.New(cfg.Routes)
+	log := logger.New(logger.TEXT, logger.INFO)
+	srv := New(cfg, r, log)
+
+	// Request with tools and tool_call history (OpenClaw format)
+	reqBody := []byte(`{
+		"model": "gemini-pro",
+		"messages": [
+			{"role": "user", "content": "What's the weather in Tokyo?"},
+			{
+				"role": "assistant",
+				"content": "",
+				"tool_calls": [{
+					"id": "call_abc123",
+					"type": "function",
+					"function": {"name": "get_weather", "arguments": "{\"location\": \"Tokyo\"}"}
+				}]
+			},
+			{"role": "tool", "content": "Sunny, 25°C", "tool_call_id": "call_abc123"}
+		],
+		"tools": [{
+			"type": "function",
+			"function": {
+				"name": "get_weather",
+				"description": "Get weather for a city",
+				"parameters": {
+					"type": "object",
+					"properties": {"location": {"type": "string"}}
+				}
+			}
+		}]
+	}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/completions", bytes.NewReader(reqBody))
+	req.Header.Set("Authorization", "Bearer sk-test-key")
+	req.Header.Set("Content-Type", "application/json")
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	bodyStr := string(receivedBody)
+	// Verify tools were included
+	assert.Contains(t, bodyStr, `"tools"`)
+	assert.Contains(t, bodyStr, `"functionDeclarations"`)
+	assert.Contains(t, bodyStr, `"get_weather"`)
+	// Verify tool_call was included (as functionCall part)
+	assert.Contains(t, bodyStr, `"functionCall"`)
+	// Verify tool result was included (as functionResponse part)
+	assert.Contains(t, bodyStr, `"functionResponse"`)
+}
+
+func TestServer_CompletionsRequest_WithTools_OpenAIBackend(t *testing.T) {
+	// OpenAI Convert 目前不处理 tools 字段（仅转换消息），但请求不应报错
+	// 这是已知限制，测试验证不会崩溃
+	mockBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{
+			"id": "chatcmpl-123",
+			"model": "gpt-4",
+			"choices": [{"message": {"role": "assistant", "content": "OK"}, "finish_reason": "stop"}],
+			"usage": {"prompt_tokens": 10, "completion_tokens": 5}
+		}`))
+	}))
+	defer mockBackend.Close()
+
+	cfg := &config.Config{
+		Routes: []config.RouteConfig{{
+			APIKey:      "sk-test-key",
+			Backend:     "openai",
+			BackendKey:  "openai-key",
+			Timeout:     30000000000,
+		}},
+		Backends: config.BackendsConfig{
+			OpenAI: config.BackendConfig{BaseURL: mockBackend.URL},
+		},
+	}
+
+	r := router.New(cfg.Routes)
+	log := logger.New(logger.TEXT, logger.INFO)
+	srv := New(cfg, r, log)
+
+	reqBody := []byte(`{
+		"model": "gpt-4",
+		"messages": [{"role": "user", "content": "What's the weather?"}],
+		"tools": [{"type": "function", "function": {"name": "get_weather", "description": "Get weather", "parameters": {"type": "object", "properties": {"location": {"type": "string"}}}}}]
+	}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/completions", bytes.NewReader(reqBody))
+	req.Header.Set("Authorization", "Bearer sk-test-key")
+	req.Header.Set("Content-Type", "application/json")
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	// 请求应正常完成（tools 被忽略，消息正常转发）
+	assert.Equal(t, http.StatusOK, rr.Code)
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Failed to parse response: %v", err)
+	}
+	choices := resp["choices"].([]interface{})
+	choice := choices[0].(map[string]interface{})
+	assert.Equal(t, "OK", choice["text"])
+}

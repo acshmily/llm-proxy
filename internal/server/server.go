@@ -418,8 +418,17 @@ func (s *Server) serveCompletionsRequest(w http.ResponseWriter, r *http.Request)
 	// 解析请求，兼容 prompt 和 messages 两种格式
 	// Content 使用 json.RawMessage 兼容字符串和数组两种格式
 	type rawMsg struct {
-		Role    string          `json:"role"`
-		Content json.RawMessage `json:"content"`
+		Role       string          `json:"role"`
+		Content    json.RawMessage `json:"content"`
+		ToolCalls  []struct {
+			ID       string `json:"id"`
+			Type     string `json:"type"`
+			Function struct {
+				Name      string `json:"name"`
+				Arguments string `json:"arguments"`
+			} `json:"function"`
+		} `json:"tool_calls,omitempty"`
+		ToolCallID string `json:"tool_call_id,omitempty"`
 	}
 	var rawRequest struct {
 		Model       string   `json:"model"`
@@ -430,6 +439,15 @@ func (s *Server) serveCompletionsRequest(w http.ResponseWriter, r *http.Request)
 		Temperature float64  `json:"temperature"`
 		TopP        float64  `json:"top_p"`
 		Stop        []string `json:"stop"`
+		Tools       []struct {
+			Type     string `json:"type"`
+			Function struct {
+				Name        string                 `json:"name"`
+				Description string                 `json:"description"`
+				Parameters  map[string]interface{} `json:"parameters"`
+			} `json:"function"`
+		} `json:"tools,omitempty"`
+		ToolChoice interface{} `json:"tool_choice,omitempty"`
 	}
 	if err := json.Unmarshal(body, &rawRequest); err != nil {
 		s.writeError(w, http.StatusBadRequest, "Invalid request format")
@@ -444,10 +462,28 @@ func (s *Server) serveCompletionsRequest(w http.ResponseWriter, r *http.Request)
 		// prompt 格式：包装为单条 user 消息
 		messages = []types.MessageRole{{Role: "user", Content: rawRequest.Prompt}}
 	} else if len(rawRequest.Messages) > 0 {
-		// messages 格式：提取 content 文本
+		// messages 格式：提取 content 文本，保留 tool_calls 和 tool_call_id
 		messages = make([]types.MessageRole, len(rawRequest.Messages))
 		for i, msg := range rawRequest.Messages {
-			messages[i] = types.MessageRole{Role: msg.Role, Content: extractContent(msg.Content)}
+			mr := types.MessageRole{
+				Role:       msg.Role,
+				Content:    extractContent(msg.Content),
+				ToolCallID: msg.ToolCallID,
+			}
+			if len(msg.ToolCalls) > 0 {
+				mr.ToolCalls = make([]types.ToolCall, len(msg.ToolCalls))
+				for j, tc := range msg.ToolCalls {
+					mr.ToolCalls[j] = types.ToolCall{
+						ID:   tc.ID,
+						Type: tc.Type,
+						Function: types.FunctionCall{
+							Name:      tc.Function.Name,
+							Arguments: tc.Function.Arguments,
+						},
+					}
+				}
+			}
+			messages[i] = mr
 		}
 	}
 
@@ -464,6 +500,22 @@ func (s *Server) serveCompletionsRequest(w http.ResponseWriter, r *http.Request)
 		Temperature:   rawRequest.Temperature,
 		TopP:          rawRequest.TopP,
 		StopSequences: rawRequest.Stop,
+		ToolChoice:    rawRequest.ToolChoice,
+	}
+
+	// 解析工具定义
+	if len(rawRequest.Tools) > 0 {
+		unified.Tools = make([]types.Tool, len(rawRequest.Tools))
+		for i, t := range rawRequest.Tools {
+			unified.Tools[i] = types.Tool{
+				Type: t.Type,
+				Function: types.FunctionDefinition{
+					Name:        t.Function.Name,
+					Description: t.Function.Description,
+					Parameters:  t.Function.Parameters,
+				},
+			}
+		}
 	}
 
 	// 复用现有后端处理逻辑
