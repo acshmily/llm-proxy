@@ -5,6 +5,16 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.7.3] - 2026-04-22
+
+### 修复
+- **Gemini 原生端点安全**: Header 转发策略从黑名单改为白名单，防止敏感信息泄露
+  - 只转发 `Content-Type`, `User-Agent`, `Accept`, `Accept-Encoding`, `Accept-Language`
+  - 不再转发 `Cookie`, `Connection`, `Transfer-Encoding` 等跳步 headers
+- **Gemini 原生端点**: BaseURL 尾部斜杠导致的路径拼接错误
+
+---
+
 ## [0.7.2] - 2026-04-22
 
 ### 新增
@@ -321,6 +331,16 @@
 ---
 
 ## 升级指南
+
+### 从 v0.7.x 升级到 v0.7.3
+
+**无破坏性变更。**
+
+**修复内容：**
+- Gemini 原生端点 Header 转发安全加固
+- BaseURL 尾部斜杠路径拼接修复
+
+---
 
 ### 从 v0.6.x 升级到 v0.6.2
 
