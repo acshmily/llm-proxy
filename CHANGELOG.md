@@ -5,6 +5,15 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.7.4] - 2026-04-22
+
+### 修复
+- **Gemini 原生端点认证**: 后端请求遗漏附加 API Key，导致 403 PERMISSION_DENIED
+  - 将 `route.BackendKey` 作为 `?key=` 查询参数附加到后端 URL
+  - 兼容客户端已有查询参数时用 `&key=` 拼接
+
+---
+
 ## [0.7.3] - 2026-04-22
 
 ### 修复
@@ -332,12 +341,13 @@
 
 ## 升级指南
 
-### 从 v0.7.x 升级到 v0.7.3
+### 从 v0.7.x 升级到 v0.7.4
 
 **无破坏性变更。**
 
 **修复内容：**
-- Gemini 原生端点 Header 转发安全加固（黑名单 → 白名单）
+- Gemini 原生端点后端认证（403 错误修复）
+- Header 转发安全加固（白名单策略）
 - BaseURL 尾部斜杠路径拼接修复
 
 ---
