@@ -10,6 +10,7 @@ import (
 	"net/http/httptrace"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/claude-projetc/llm-proxy/internal/config"
 	"github.com/claude-projetc/llm-proxy/internal/logger"
@@ -1350,12 +1351,22 @@ func (s *Server) logResponseBody(path string, body []byte, statusCode int) {
 }
 
 // truncateBody truncates body to max bytes, returns truncated string and total length.
+// Safely handles UTF-8 multi-byte character boundaries.
 func truncateBody(body []byte, max int) (string, int) {
 	total := len(body)
 	if total <= max {
 		return string(body), total
 	}
-	return string(body[:max]) + "...(truncated, " + fmt.Sprintf("%d bytes total", total), total
+	// 回退到最后一个完整 UTF-8 字符边界
+	end := max
+	for end > 0 {
+		_, size := utf8.DecodeLastRune(body[:end])
+		if size > 0 {
+			break
+		}
+		end--
+	}
+	return string(body[:end]) + fmt.Sprintf("...(truncated, %d bytes total)", total), total
 }
 
 // extractContent extracts text content from either a JSON string or an array of content blocks.

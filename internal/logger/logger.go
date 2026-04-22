@@ -85,10 +85,14 @@ func (l *Logger) log(level Level, msg string, fields ...LogField) {
 		data, _ := json.Marshal(entry)
 		fmt.Fprintln(os.Stderr, string(data))
 	} else {
-		fmt.Fprintf(os.Stderr, "[%s] %s: %s\n",
+		fmt.Fprintf(os.Stderr, "[%s] %s: %s",
 			time.Now().Format(time.RFC3339),
 			levelToString(level),
 			msg)
+		for _, f := range fields {
+			fmt.Fprintf(os.Stderr, " %s=%v", f.Key, f.Value)
+		}
+		fmt.Fprintln(os.Stderr)
 	}
 }
 
