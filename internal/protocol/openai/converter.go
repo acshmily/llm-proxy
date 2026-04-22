@@ -6,6 +6,29 @@ import (
 	"github.com/claude-projetc/llm-proxy/pkg/types"
 )
 
+// OpenAIFunctionDef OpenAI 函数定义
+type OpenAIFunctionDef struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Parameters  map[string]interface{} `json:"parameters"`
+}
+
+// OpenAITool OpenAI 工具声明
+type OpenAITool struct {
+	Type     string            `json:"type"`
+	Function OpenAIFunctionDef `json:"function"`
+}
+
+// ToolCallRef OpenAI 格式的工具调用引用
+type ToolCallRef struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
 // OpenAIRequest OpenAI API 请求格式
 type OpenAIRequest struct {
 	Model       string        `json:"model"`
@@ -15,12 +38,15 @@ type OpenAIRequest struct {
 	Temperature float64       `json:"temperature,omitempty"`
 	TopP        float64       `json:"top_p,omitempty"`
 	Stop        []string      `json:"stop,omitempty"`
+	Tools       []OpenAITool  `json:"tools,omitempty"`
 }
 
 // ChatMessage OpenAI 聊天消息
 type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string        `json:"role"`
+	Content    string        `json:"content"`
+	ToolCalls  []ToolCallRef `json:"tool_calls,omitempty"`
+	ToolCallID string        `json:"tool_call_id,omitempty"`
 }
 
 // Convert 统一格式 -> OpenAI 格式
