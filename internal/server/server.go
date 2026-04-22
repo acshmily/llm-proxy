@@ -972,7 +972,11 @@ func convertGeminiSSEToOpenAI(event string, data []byte) []byte {
 		Candidates []struct {
 			Content struct {
 				Parts []struct {
-					Text string `json:"text"`
+					Text         string `json:"text"`
+					FunctionCall *struct {
+						Name      string                 `json:"name"`
+						Arguments map[string]interface{} `json:"arguments"`
+					} `json:"functionCall"`
 				} `json:"parts"`
 			} `json:"content"`
 			FinishReason string `json:"finishReason"`
@@ -983,21 +987,59 @@ func convertGeminiSSEToOpenAI(event string, data []byte) []byte {
 		return nil
 	}
 
-	if len(geminiResp.Candidates) > 0 && len(geminiResp.Candidates[0].Content.Parts) > 0 {
-		text := geminiResp.Candidates[0].Content.Parts[0].Text
-		finishReason := geminiResp.Candidates[0].FinishReason
+	if len(geminiResp.Candidates) == 0 {
+		return nil
+	}
+
+	candidate := geminiResp.Candidates[0]
+
+	// Handle functionCall part
+	if len(candidate.Content.Parts) > 0 {
+		part := candidate.Content.Parts[0]
+		if part.FunctionCall != nil {
+			args, _ := json.Marshal(part.FunctionCall.Arguments)
+			payload := map[string]interface{}{
+				"choices": []map[string]interface{}{
+					{
+						"delta": map[string]interface{}{
+							"role": "assistant",
+							"tool_calls": []map[string]interface{}{
+								{
+									"index": 0,
+									"id":    "call_stream",
+									"type":  "function",
+									"function": map[string]interface{}{
+										"name":      part.FunctionCall.Name,
+										"arguments": string(args),
+									},
+								},
+							},
+						},
+						"finish_reason": nil,
+					},
+				},
+			}
+			result, _ := json.Marshal(payload)
+			return append([]byte("data: "), result...)
+		}
+	}
+
+	// Handle text part
+	if len(candidate.Content.Parts) > 0 && candidate.Content.Parts[0].Text != "" {
+		text := candidate.Content.Parts[0].Text
+		finishReason := candidate.FinishReason
 
 		var openaiFinishReason string
-		if finishReason == "STOP" {
+		switch finishReason {
+		case "STOP":
 			openaiFinishReason = "stop"
-		} else if finishReason == "MAX_TOKENS" {
+		case "MAX_TOKENS":
 			openaiFinishReason = "length"
-		} else {
+		default:
 			openaiFinishReason = "stop"
 		}
 
 		if text != "" {
-			// 使用 json.Marshal 避免 JSON 注入
 			payload := map[string]interface{}{
 				"choices": []map[string]interface{}{
 					{"delta": map[string]interface{}{"content": text}, "finish_reason": nil},
@@ -1007,7 +1049,6 @@ func convertGeminiSSEToOpenAI(event string, data []byte) []byte {
 			return append([]byte("data: "), result...)
 		}
 		if finishReason != "" {
-			// 使用 json.Marshal 避免 JSON 注入
 			payload := map[string]interface{}{
 				"choices": []map[string]interface{}{
 					{"delta": map[string]interface{}{}, "finish_reason": openaiFinishReason},

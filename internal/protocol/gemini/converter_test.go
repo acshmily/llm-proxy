@@ -213,6 +213,35 @@ func TestParseResponse(t *testing.T) {
 	})
 }
 
+func TestParseResponse_WithFunctionCall(t *testing.T) {
+	// Simulate Gemini returning functionCall response
+	data := []byte(`{
+		"candidates": [{
+			"content": {
+				"parts": [{
+					"functionCall": {
+						"name": "get_weather",
+						"arguments": {"location": "Tokyo"}
+					}
+				}],
+				"role": "model"
+			},
+			"finishReason": "STOP"
+		}]
+	}`)
+
+	resp, err := ParseResponse(data, "gemini-2.5-flash")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Current ParseResponse only handles text part, functionCall should be ignored
+	// This test verifies it doesn't panic or crash
+	if resp == nil {
+		t.Fatal("Expected non-nil response")
+	}
+}
+
 func TestConvert_WithTools(t *testing.T) {
 	um := &types.UnifiedMessage{
 		Model: "gemini-2.5-flash",
