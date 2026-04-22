@@ -98,7 +98,7 @@ func TestEndToEnd_ToolCalling(t *testing.T) {
 	// Verify tool message has functionResponse part
 	thirdMsg, ok := contents[2].(map[string]interface{})
 	if assert.True(t, ok, "Expected third content to be map") {
-		assert.Equal(t, "tool", thirdMsg["role"])
+		assert.Equal(t, "user", thirdMsg["role"])
 	}
 
 	// Verify tools

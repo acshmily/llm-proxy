@@ -14,11 +14,11 @@ func TestMapToGeminiRole(t *testing.T) {
 	}{
 		{"system", "user"},
 		{"developer", "user"},
-		{"tool", "tool"},
+		{"tool", "user"},
 		{"assistant", "model"},
 		{"user", "user"},
 		{"model", "model"},
-		{"tool_result", "tool_result"}, // unknown role passthrough
+		{"tool_result", "user"},
 	}
 
 	for _, tt := range tests {
@@ -420,8 +420,8 @@ func TestConvert_ToolResult(t *testing.T) {
 	}
 
 	thirdMsg := contents[2].(map[string]interface{})
-	if thirdMsg["role"] != "tool" {
-		t.Errorf("Expected role 'tool', got %v", thirdMsg["role"])
+	if thirdMsg["role"] != "user" {
+		t.Errorf("Expected role 'user' (tool mapped to user for Gemini), got %v", thirdMsg["role"])
 	}
 
 	parts := thirdMsg["parts"].([]interface{})
@@ -729,7 +729,7 @@ func TestConvert_MergeConsecutiveSameRoles(t *testing.T) {
 			roles[i] = c.(map[string]interface{})["role"].(string)
 		}
 
-		expected := []string{"user", "model", "tool", "model"}
+		expected := []string{"user", "model", "user", "model"}
 		for i, r := range roles {
 			if r != expected[i] {
 				t.Errorf("Content %d: expected role '%s', got '%s'", i, expected[i], r)
@@ -809,7 +809,7 @@ func TestConvert_EmbeddedAgentScenario(t *testing.T) {
 	}
 
 	// 验证角色交替
-	expectedRoles := []string{"user", "model", "tool"}
+	expectedRoles := []string{"user", "model", "user"}
 	for i, c := range contents {
 		cm := c.(map[string]interface{})
 		if cm["role"] != expectedRoles[i] {

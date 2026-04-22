@@ -15,6 +15,9 @@ func mapToGeminiRole(role string) string {
 		return "user"
 	case "assistant":
 		return "model"
+	case "tool", "tool_result":
+		// Gemini 不支持 tool 角色，函数响应必须使用 user 角色
+		return "user"
 	default:
 		return role
 	}
