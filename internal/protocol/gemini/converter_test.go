@@ -53,14 +53,19 @@ func TestConvert_RoleMapping(t *testing.T) {
 		t.Fatal("Expected contents array")
 	}
 
-	first := contents[0].(map[string]interface{})
-	if first["role"] != "user" {
-		t.Errorf("Expected system role mapped to 'user', got '%v'", first["role"])
+	// system(user) + user 合并为 1 条，加上 assistant → 共 2 条
+	if len(contents) != 2 {
+		t.Fatalf("Expected 2 contents (merged system+user + assistant), got %d", len(contents))
 	}
 
-	third := contents[2].(map[string]interface{})
-	if third["role"] != "model" {
-		t.Errorf("Expected assistant role mapped to 'model', got '%v'", third["role"])
+	first := contents[0].(map[string]interface{})
+	if first["role"] != "user" {
+		t.Errorf("Expected system role merged to 'user', got '%v'", first["role"])
+	}
+
+	second := contents[1].(map[string]interface{})
+	if second["role"] != "model" {
+		t.Errorf("Expected assistant role mapped to 'model', got '%v'", second["role"])
 	}
 }
 
@@ -549,6 +554,172 @@ func TestConvert_MultipleToolCalls(t *testing.T) {
 			t.Errorf("Expected functionCall at index %d", i)
 		}
 	}
+}
+
+func TestConvert_MergeConsecutiveSameRoles(t *testing.T) {
+	t.Run("system followed by user merges into one", func(t *testing.T) {
+		um := &types.UnifiedMessage{
+			Model: "gemini-2.5-flash",
+			Messages: []types.MessageRole{
+				{Role: "system", Content: "You are helpful."},
+				{Role: "user", Content: "Hello"},
+			},
+		}
+
+		data, err := Convert(um, "gemini-2.5-flash")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var req map[string]interface{}
+		if err := json.Unmarshal(data, &req); err != nil {
+			t.Fatal(err)
+		}
+
+		contents := req["contents"].([]interface{})
+		// system(user) + user → should merge into 1 content
+		if len(contents) != 1 {
+			t.Fatalf("Expected 1 merged content (system→user + user), got %d", len(contents))
+		}
+
+		c := contents[0].(map[string]interface{})
+		if c["role"] != "user" {
+			t.Errorf("Expected role 'user', got %v", c["role"])
+		}
+
+		parts := c["parts"].([]interface{})
+		if len(parts) != 1 {
+			t.Fatalf("Expected 1 text part (merged), got %d", len(parts))
+		}
+
+		text := parts[0].(map[string]interface{})["text"]
+		if text != "You are helpful.\n\nHello" {
+			t.Errorf("Expected merged text 'You are helpful.\\n\\nHello', got %v", text)
+		}
+	})
+
+	t.Run("multiple system messages merge into one", func(t *testing.T) {
+		um := &types.UnifiedMessage{
+			Model: "gemini-2.5-flash",
+			Messages: []types.MessageRole{
+				{Role: "system", Content: "Rule 1"},
+				{Role: "system", Content: "Rule 2"},
+				{Role: "user", Content: "Hello"},
+			},
+		}
+
+		data, err := Convert(um, "gemini-2.5-flash")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var req map[string]interface{}
+		if err := json.Unmarshal(data, &req); err != nil {
+			t.Fatal(err)
+		}
+
+		contents := req["contents"].([]interface{})
+		// All 3 map to 'user' role (system→user, system→user, user→user) → merge into 1
+		if len(contents) != 1 {
+			t.Fatalf("Expected 1 merged content (all user role), got %d", len(contents))
+		}
+
+		// Content should be all 3 messages concatenated
+		first := contents[0].(map[string]interface{})
+		parts := first["parts"].([]interface{})
+		if len(parts) != 1 {
+			t.Fatalf("Expected 1 text part (merged), got %d", len(parts))
+		}
+
+		text := parts[0].(map[string]interface{})["text"]
+		if text != "Rule 1\n\nRule 2\n\nHello" {
+			t.Errorf("Expected merged text 'Rule 1\\n\\nRule 2\\n\\nHello', got %v", text)
+		}
+	})
+
+	t.Run("proper alternation preserved", func(t *testing.T) {
+		um := &types.UnifiedMessage{
+			Model: "gemini-2.5-flash",
+			Messages: []types.MessageRole{
+				{Role: "user", Content: "Hello"},
+				{Role: "assistant", Content: "Hi there"},
+				{Role: "user", Content: "How are you?"},
+			},
+		}
+
+		data, err := Convert(um, "gemini-2.5-flash")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var req map[string]interface{}
+		if err := json.Unmarshal(data, &req); err != nil {
+			t.Fatal(err)
+		}
+
+		contents := req["contents"].([]interface{})
+		if len(contents) != 3 {
+			t.Fatalf("Expected 3 contents (no merge needed), got %d", len(contents))
+		}
+	})
+
+	t.Run("complex alternation with tool calls preserved", func(t *testing.T) {
+		um := &types.UnifiedMessage{
+			Model: "gemini-2.5-flash",
+			Messages: []types.MessageRole{
+				{Role: "system", Content: "You are a weather assistant."},
+				{Role: "developer", Content: "Use the get_weather tool."},
+				{Role: "user", Content: "What's the weather in Tokyo?"},
+				{
+					Role: "assistant",
+					ToolCalls: []types.ToolCall{
+						{
+							ID:   "call_abc",
+							Type: "function",
+							Function: types.FunctionCall{
+								Name:      "get_weather",
+								Arguments: `{"location": "Tokyo"}`,
+							},
+						},
+					},
+				},
+				{Role: "tool", Content: `{"temp": 25}`, ToolCallID: "call_abc"},
+				{Role: "assistant", Content: "It's 25°C in Tokyo."},
+			},
+		}
+
+		data, err := Convert(um, "gemini-2.5-flash")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var req map[string]interface{}
+		if err := json.Unmarshal(data, &req); err != nil {
+			t.Fatal(err)
+		}
+
+		contents := req["contents"].([]interface{})
+		// system + developer + user → merge to 1 user
+		// assistant with tool_calls → 1 model
+		// tool → 1 tool
+		// assistant → 1 model
+		// Total: 4
+		if len(contents) != 4 {
+			t.Fatalf("Expected 4 contents, got %d", len(contents))
+		}
+
+		roles := make([]string, len(contents))
+		for i, c := range contents {
+			roles[i] = c.(map[string]interface{})["role"].(string)
+		}
+
+		expected := []string{"user", "model", "tool", "model"}
+		for i, r := range roles {
+			if r != expected[i] {
+				t.Errorf("Content %d: expected role '%s', got '%s'", i, expected[i], r)
+			}
+		}
+	})
 }
 
 func TestGeminiRoundTrip(t *testing.T) {

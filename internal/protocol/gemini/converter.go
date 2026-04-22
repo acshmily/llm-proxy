@@ -3,6 +3,7 @@ package gemini
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/claude-projetc/llm-proxy/pkg/types"
 )
@@ -21,10 +22,13 @@ func mapToGeminiRole(role string) string {
 
 // Convert 统一格式 -> Gemini 格式
 func Convert(um *types.UnifiedMessage, modelOverride string) ([]byte, error) {
+	// 先合并连续相同角色的消息，避免 Gemini API 角色交替违规
+	messages := mergeConsecutiveSameRoles(um.Messages)
+
 	// Gemini 使用 contents 数组
-	contents := make([]map[string]interface{}, len(um.Messages))
-	for i, msg := range um.Messages {
-		parts := buildGeminiParts(msg, um.Messages)
+	contents := make([]map[string]interface{}, len(messages))
+	for i, msg := range messages {
+		parts := buildGeminiParts(msg, messages)
 		contents[i] = map[string]interface{}{
 			"role":  mapToGeminiRole(msg.Role),
 			"parts": parts,
@@ -60,6 +64,71 @@ func Convert(um *types.UnifiedMessage, modelOverride string) ([]byte, error) {
 	}
 
 	return json.Marshal(req)
+}
+
+// mergeConsecutiveSameRoles 合并连续相同 Gemini 角色的消息。
+// Gemini API 要求角色严格交替（user → model → user → model），
+// 连续的 user 或 model 角色会导致 400 错误。
+func mergeConsecutiveSameRoles(messages []types.MessageRole) []types.MessageRole {
+	if len(messages) == 0 {
+		return messages
+	}
+
+	var result []types.MessageRole
+	for i := 0; i < len(messages); i++ {
+		geminiRole := mapToGeminiRole(messages[i].Role)
+
+		// 查找从 i 开始有多少条连续的同角色消息
+		end := i + 1
+		for end < len(messages) && mapToGeminiRole(messages[end].Role) == geminiRole {
+			end++
+		}
+
+		if end-i == 1 {
+			// 只有一条，不需要合并
+			result = append(result, messages[i])
+		} else {
+			// 合并连续的同角色消息
+			merged := mergeMessages(messages[i:end], geminiRole)
+			result = append(result, merged)
+		}
+
+		i = end - 1 // 循环会 i++
+	}
+
+	return result
+}
+
+// mergeMessages 将多条同角色消息合并为一条
+func mergeMessages(msgs []types.MessageRole, geminiRole string) types.MessageRole {
+	merged := types.MessageRole{Role: msgs[0].Role} // 保留原始 role
+
+	switch geminiRole {
+	case "user":
+		// user 消息：将所有文本内容拼接
+		var parts []string
+		for _, m := range msgs {
+			if m.Content != "" {
+				parts = append(parts, m.Content)
+			}
+		}
+		merged.Content = strings.Join(parts, "\n\n")
+	case "model":
+		// model 消息：合并文本，保留所有 tool_calls
+		var texts []string
+		for _, m := range msgs {
+			if m.Content != "" {
+				texts = append(texts, m.Content)
+			}
+			merged.ToolCalls = append(merged.ToolCalls, m.ToolCalls...)
+		}
+		merged.Content = strings.Join(texts, "\n\n")
+	default:
+		// tool 等其他角色：不合并，只取第一条
+		merged = msgs[0]
+	}
+
+	return merged
 }
 
 // buildGeminiParts 根据消息内容构建 Gemini parts（支持多个）
