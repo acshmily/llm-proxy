@@ -756,8 +756,11 @@ func (s *Server) serveGeminiRequest(w http.ResponseWriter, r *http.Request) {
 		path = strings.TrimPrefix(path, "v1beta/")
 	}
 	backendURL := baseURL + "/" + path
+	// 保留原始查询参数，并附加 Gemini API Key
 	if r.URL.RawQuery != "" {
-		backendURL += "?" + r.URL.RawQuery
+		backendURL += "?" + r.URL.RawQuery + "&key=" + route.BackendKey
+	} else {
+		backendURL += "?key=" + route.BackendKey
 	}
 
 	// 创建后端请求

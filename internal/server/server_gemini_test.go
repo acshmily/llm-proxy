@@ -217,6 +217,87 @@ func TestGeminiEndpoint_BaseURLWithTrailingSlash(t *testing.T) {
 	}
 }
 
+func TestGeminiEndpoint_APIKeyAppendedToURL(t *testing.T) {
+	// 验证后端 API Key 正确附加到 URL 查询参数中
+	var receivedQuery string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}`))
+	}))
+	defer backend.Close()
+
+	cfg := &config.Config{
+		Routes: []config.RouteConfig{
+			{APIKey: "sk-test", Backend: "gemini", BackendKey: "gemini-secret-key", Timeout: 30000000000},
+		},
+		Backends: config.BackendsConfig{
+			Gemini: config.BackendConfig{BaseURL: backend.URL},
+		},
+	}
+	srv := New(cfg, router.New(cfg.Routes), logger.New(logger.TEXT, logger.INFO))
+
+	body := `{"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-pro:generateContent", nil)
+	req.Header.Set("Authorization", "Bearer sk-test")
+	req.Header.Set("Content-Type", "application/json")
+	req.Body = io.NopCloser(strings.NewReader(body))
+
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected 200, got %d", w.Code)
+		return
+	}
+
+	if !strings.Contains(receivedQuery, "key=gemini-secret-key") {
+		t.Errorf("Expected API key in query params, got: %s", receivedQuery)
+	}
+}
+
+func TestGeminiEndpoint_APIKeyAppendedWithExistingQuery(t *testing.T) {
+	// 验证客户端已有查询参数时 API Key 用 & 拼接
+	var receivedQuery string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}`))
+	}))
+	defer backend.Close()
+
+	cfg := &config.Config{
+		Routes: []config.RouteConfig{
+			{APIKey: "sk-test", Backend: "gemini", BackendKey: "gemini-secret-key", Timeout: 30000000000},
+		},
+		Backends: config.BackendsConfig{
+			Gemini: config.BackendConfig{BaseURL: backend.URL},
+		},
+	}
+	srv := New(cfg, router.New(cfg.Routes), logger.New(logger.TEXT, logger.INFO))
+
+	body := `{"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-pro:streamGenerateContent?alt=sse", nil)
+	req.Header.Set("Authorization", "Bearer sk-test")
+	req.Header.Set("Content-Type", "application/json")
+	req.Body = io.NopCloser(strings.NewReader(body))
+
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected 200, got %d", w.Code)
+		return
+	}
+
+	if !strings.Contains(receivedQuery, "alt=sse") {
+		t.Errorf("Expected alt=sse in query params, got: %s", receivedQuery)
+	}
+	if !strings.Contains(receivedQuery, "key=gemini-secret-key") {
+		t.Errorf("Expected API key in query params, got: %s", receivedQuery)
+	}
+}
+
 func TestGeminiEndpoint_ForwardsStreamingResponse(t *testing.T) {
 	// Mock Gemini backend returning SSE
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
