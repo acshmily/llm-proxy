@@ -5,6 +5,15 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.7.8] - 2026-04-22
+
+### 修复
+- **tool 角色映射**: `tool` 角色未映射为 `user`，Gemini API 不识别 `tool` 角色
+  - 根据官方文档，函数响应必须使用 `user` 角色
+  - 此修复是 400 错误的另一层原因
+
+---
+
 ## [0.7.7] - 2026-04-22
 
 ### 修复
