@@ -58,3 +58,17 @@ func TestExtractContent_InvalidJSON(t *testing.T) {
 	content := json.RawMessage(`{invalid json}`)
 	assert.Equal(t, "", extractContent(content))
 }
+
+func TestExtractContentWithToolUse(t *testing.T) {
+	// tool_use type should return empty string (tool calls are passed via ToolCalls field)
+	content := json.RawMessage(`[{"type": "tool_use", "id": "call_abc", "name": "get_weather", "input": {"location": "Tokyo"}}]`)
+	result := extractContent(content)
+	assert.Equal(t, "", result)
+}
+
+func TestExtractContentWithToolResult(t *testing.T) {
+	// tool_result type should return content text
+	content := json.RawMessage(`[{"type": "tool_result", "tool_use_id": "call_abc", "content": "Temperature: 25°C"}]`)
+	result := extractContent(content)
+	assert.Equal(t, "Temperature: 25°C", result)
+}

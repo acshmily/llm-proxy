@@ -1372,6 +1372,9 @@ func truncateBody(body []byte, max int) (string, int) {
 // extractContent extracts text content from either a JSON string or an array of content blocks.
 // OpenClaw sends array format: [{"type": "text", "text": "..."}]
 // Standard clients send string format: "Hello"
+// extractContent extracts text content from either a JSON string or an array of content blocks.
+// OpenClaw sends array format: [{"type": "text", "text": "..."}]
+// Standard clients send string format: "Hello"
 func extractContent(content json.RawMessage) string {
 	if len(content) == 0 {
 		return ""
@@ -1383,14 +1386,18 @@ func extractContent(content json.RawMessage) string {
 	}
 	// Try array format
 	var blocks []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
+		Type    string `json:"type"`
+		Text    string `json:"text"`
+		Content string `json:"content"`
 	}
 	if err := json.Unmarshal(content, &blocks); err == nil {
 		var result string
 		for _, b := range blocks {
 			if b.Type == "text" && b.Text != "" {
 				result += b.Text
+			}
+			if b.Type == "tool_result" && b.Content != "" {
+				result += b.Content
 			}
 		}
 		return result
