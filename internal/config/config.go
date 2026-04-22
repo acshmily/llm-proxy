@@ -52,8 +52,10 @@ type ServerConfig struct {
 }
 
 type LoggingConfig struct {
-	Format string `yaml:"format"` // "json" or "text"
-	Level  string `yaml:"level"`
+	Format        string `yaml:"format"` // "json" or "text"
+	Level         string `yaml:"level"`
+	DebugRequests bool   `yaml:"debug_requests"`    // 开启请求/响应体日志
+	DebugMaxBody  int    `yaml:"debug_max_body"`    // 截断长度（字节），默认 2048
 }
 
 type RouteConfig struct {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptrace"
@@ -23,13 +24,15 @@ import (
 )
 
 type Server struct {
-	cfg       *config.Config
-	router    *router.Router
-	log       *logger.Logger
-	client    *http.Client
-	transport *http.Transport
-	poolStats *PoolStats
-	wsTunnel  *WSTunnelMiddleware
+	cfg           *config.Config
+	router        *router.Router
+	log           *logger.Logger
+	client        *http.Client
+	transport     *http.Transport
+	poolStats     *PoolStats
+	wsTunnel      *WSTunnelMiddleware
+	debugRequests bool
+	debugMaxBody  int
 }
 
 // PoolStats 连接池统计
@@ -98,14 +101,22 @@ func New(cfg *config.Config, r *router.Router, log *logger.Logger) *Server {
 		}
 	}()
 
+	// 初始化 debug 日志配置
+	debugMaxBody := cfg.Logging.DebugMaxBody
+	if debugMaxBody <= 0 {
+		debugMaxBody = 2048
+	}
+
 	s := &Server{
-		cfg:       cfg,
-		router:    r,
-		log:       log,
-		client:    client,
-		transport: transport,
-		poolStats: poolStats,
-		wsTunnel:  wsTunnel,
+		cfg:           cfg,
+		router:        r,
+		log:           log,
+		client:        client,
+		transport:     transport,
+		poolStats:     poolStats,
+		wsTunnel:      wsTunnel,
+		debugRequests: cfg.Logging.DebugRequests,
+		debugMaxBody:  debugMaxBody,
 	}
 
 	// 配置 WebSocket 隧道的请求处理回调（在 s 创建之后）
@@ -180,6 +191,8 @@ func (s *Server) serveRequest(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadRequest, "Invalid request format")
 		return
 	}
+
+	s.logRequestBody(r.URL.Path, body)
 
 	// 选择后端转换器
 	var backendURL string
@@ -287,6 +300,8 @@ func (s *Server) serveOpenAIRequest(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, http.StatusBadRequest, "Invalid request format")
 		return
 	}
+
+	s.logRequestBody(r.URL.Path, body)
 
 	// 选择后端转换器
 	var backendURL string
@@ -415,6 +430,8 @@ func (s *Server) serveCompletionsRequest(w http.ResponseWriter, r *http.Request)
 		s.writeError(w, http.StatusBadRequest, "Invalid request format")
 		return
 	}
+
+	s.logRequestBody(r.URL.Path, body)
 
 	// 转换为统一消息格式
 	var messages []types.MessageRole
@@ -546,6 +563,8 @@ func (s *Server) handleStream(w http.ResponseWriter, resp *http.Response, backen
 func (s *Server) handleNonStream(w http.ResponseWriter, resp *http.Response, backend string, model string, latency int64, start time.Time, connReused bool) {
 	body, _ := io.ReadAll(resp.Body)
 
+	s.logResponseBody("/v1/messages", body, resp.StatusCode)
+
 	if resp.StatusCode != http.StatusOK {
 		s.writeError(w, resp.StatusCode, string(body))
 		return
@@ -591,6 +610,8 @@ func (s *Server) handleNonStream(w http.ResponseWriter, resp *http.Response, bac
 // handleOpenAINonStream 处理 OpenAI 非流式响应
 func (s *Server) handleOpenAINonStream(w http.ResponseWriter, resp *http.Response, backend string, model string, latency int64, start time.Time, connReused bool) {
 	body, _ := io.ReadAll(resp.Body)
+
+	s.logResponseBody("/v1/chat/completions", body, resp.StatusCode)
 
 	if resp.StatusCode != http.StatusOK {
 		// 转换后端错误为 OpenAI 格式
@@ -692,6 +713,8 @@ func (s *Server) handleOpenAIStream(w http.ResponseWriter, resp *http.Response, 
 // handleCompletionsNonStream 处理 Completions 非流式响应（/v1/completions）
 func (s *Server) handleCompletionsNonStream(w http.ResponseWriter, resp *http.Response, backend string, model string, latency int64, start time.Time, connReused bool) {
 	body, _ := io.ReadAll(resp.Body)
+
+	s.logResponseBody("/v1/completions", body, resp.StatusCode)
 
 	if resp.StatusCode != http.StatusOK {
 		s.writeError(w, resp.StatusCode, convertBackendError(backend, body))
@@ -1297,6 +1320,42 @@ func getDefaultModel(backend string) string {
 	default:
 		return ""
 	}
+}
+
+// logRequestBody logs the request body if debug_requests is enabled.
+func (s *Server) logRequestBody(path string, body []byte) {
+	if !s.debugRequests || len(body) == 0 {
+		return
+	}
+	truncated, total := truncateBody(body, s.debugMaxBody)
+	s.log.Debug("Request body",
+		logger.LogField{Key: "path", Value: path},
+		logger.LogField{Key: "body", Value: truncated},
+		logger.LogField{Key: "total_bytes", Value: total},
+	)
+}
+
+// logResponseBody logs the response body if debug_requests is enabled.
+func (s *Server) logResponseBody(path string, body []byte, statusCode int) {
+	if !s.debugRequests || len(body) == 0 {
+		return
+	}
+	truncated, total := truncateBody(body, s.debugMaxBody)
+	s.log.Debug("Response body",
+		logger.LogField{Key: "path", Value: path},
+		logger.LogField{Key: "status", Value: statusCode},
+		logger.LogField{Key: "body", Value: truncated},
+		logger.LogField{Key: "total_bytes", Value: total},
+	)
+}
+
+// truncateBody truncates body to max bytes, returns truncated string and total length.
+func truncateBody(body []byte, max int) (string, int) {
+	total := len(body)
+	if total <= max {
+		return string(body), total
+	}
+	return string(body[:max]) + "...(truncated, " + fmt.Sprintf("%d bytes total", total), total
 }
 
 // extractContent extracts text content from either a JSON string or an array of content blocks.

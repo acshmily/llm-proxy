@@ -57,6 +57,10 @@ func (l *Logger) Error(msg string, fields ...LogField) {
 	l.log(ERROR, msg, fields...)
 }
 
+func (l *Logger) Debug(msg string, fields ...LogField) {
+	l.log(DEBUG, msg, fields...)
+}
+
 type LogField struct {
 	Key   string
 	Value interface{}
