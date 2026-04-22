@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/claude-projetc/llm-proxy/internal/protocol/gemini"
 	"github.com/claude-projetc/llm-proxy/internal/protocol/openai"
 )
@@ -45,62 +47,73 @@ func TestEndToEnd_ToolCalling(t *testing.T) {
 
 	// Step 1: OpenAI parser
 	unified, err := openai.ParseRequest(openaiReq)
-	if err != nil {
-		t.Fatalf("OpenAI ParseRequest failed: %v", err)
-	}
-
-	// Verify tools parsed
-	if len(unified.Tools) != 1 {
-		t.Fatalf("Expected 1 tool, got %d", len(unified.Tools))
-	}
+	assert.NoError(t, err)
+	assert.Len(t, unified.Tools, 1)
+	assert.Equal(t, "get_weather", unified.Tools[0].Function.Name)
 
 	// Verify tool_calls parsed
-	if len(unified.Messages[1].ToolCalls) != 1 {
-		t.Fatalf("Expected tool_calls in assistant message")
-	}
+	assert.Len(t, unified.Messages[1].ToolCalls, 1)
+	assert.Equal(t, "get_weather", unified.Messages[1].ToolCalls[0].Function.Name)
 
 	// Verify tool role
-	if unified.Messages[2].Role != "tool" {
-		t.Fatalf("Expected role 'tool', got %s", unified.Messages[2].Role)
-	}
+	assert.Equal(t, "tool", unified.Messages[2].Role)
+	assert.Equal(t, "call_abc123", unified.Messages[2].ToolCallID)
 
 	// Step 2: Gemini converter
 	geminiReq, err := gemini.Convert(unified, "gemini-2.5-flash")
-	if err != nil {
-		t.Fatalf("Gemini Convert failed: %v", err)
-	}
+	assert.NoError(t, err)
 
 	// Step 3: Verify final Gemini request format
 	var result map[string]interface{}
-	if err := json.Unmarshal(geminiReq, &result); err != nil {
-		t.Fatalf("Failed to unmarshal Gemini request: %v", err)
-	}
+	err = json.Unmarshal(geminiReq, &result)
+	assert.NoError(t, err)
 
 	// Verify contents
 	contents, ok := result["contents"].([]interface{})
-	if !ok {
-		t.Fatal("Expected contents array")
+	if !assert.True(t, ok, "Expected contents array, got %T", result["contents"]) {
+		return
 	}
-	if len(contents) != 3 {
-		t.Fatalf("Expected 3 contents, got %d", len(contents))
-	}
+	assert.Len(t, contents, 3)
 
 	// Verify first message is user
-	firstMsg := contents[0].(map[string]interface{})
-	if firstMsg["role"] != "user" {
-		t.Errorf("Expected first role 'user', got %v", firstMsg["role"])
+	firstMsg, ok := contents[0].(map[string]interface{})
+	if assert.True(t, ok, "Expected first content to be map") {
+		assert.Equal(t, "user", firstMsg["role"])
+	}
+
+	// Verify assistant message has functionCall part
+	secondMsg, ok := contents[1].(map[string]interface{})
+	if assert.True(t, ok, "Expected second content to be map") {
+		assert.Equal(t, "model", secondMsg["role"])
+		parts, ok := secondMsg["parts"].([]interface{})
+		if assert.True(t, ok) && assert.Len(t, parts, 1) {
+			part, ok := parts[0].(map[string]interface{})
+			if assert.True(t, ok) {
+				_, hasFunctionCall := part["functionCall"]
+				assert.True(t, hasFunctionCall, "Expected functionCall part in assistant message")
+			}
+		}
+	}
+
+	// Verify tool message has functionResponse part
+	thirdMsg, ok := contents[2].(map[string]interface{})
+	if assert.True(t, ok, "Expected third content to be map") {
+		assert.Equal(t, "tool", thirdMsg["role"])
 	}
 
 	// Verify tools
 	tools, ok := result["tools"].([]interface{})
-	if !ok {
-		t.Fatal("Expected tools array in final Gemini request")
-	}
-	tool := tools[0].(map[string]interface{})
-	funcDeclarations := tool["functionDeclarations"].([]interface{})
-	funcDecl := funcDeclarations[0].(map[string]interface{})
-	if funcDecl["name"] != "get_weather" {
-		t.Errorf("Expected function name 'get_weather', got %v", funcDecl["name"])
+	if assert.True(t, ok, "Expected tools array in final Gemini request") {
+		tool, ok := tools[0].(map[string]interface{})
+		if assert.True(t, ok) {
+			funcDeclarations, ok := tool["functionDeclarations"].([]interface{})
+			if assert.True(t, ok) && assert.Len(t, funcDeclarations, 1) {
+				funcDecl, ok := funcDeclarations[0].(map[string]interface{})
+				if assert.True(t, ok) {
+					assert.Equal(t, "get_weather", funcDecl["name"])
+				}
+			}
+		}
 	}
 
 	// Print final Gemini request for debugging
