@@ -14,7 +14,7 @@ func TestMapToGeminiRole(t *testing.T) {
 	}{
 		{"system", "user"},
 		{"developer", "user"},
-		{"tool", "user"},
+		{"tool", "tool"},
 		{"assistant", "model"},
 		{"user", "user"},
 		{"model", "model"},
@@ -211,6 +211,116 @@ func TestParseResponse(t *testing.T) {
 			t.Error("Expected error for invalid JSON")
 		}
 	})
+}
+
+func TestConvert_WithTools(t *testing.T) {
+	um := &types.UnifiedMessage{
+		Model: "gemini-2.5-flash",
+		Messages: []types.MessageRole{
+			{Role: "user", Content: "What's the weather in Tokyo?"},
+		},
+		Tools: []types.Tool{
+			{
+				Type: "function",
+				Function: types.FunctionDefinition{
+					Name:        "get_weather",
+					Description: "Get the current weather in a location",
+					Parameters: map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"location": map[string]interface{}{
+								"type":        "string",
+								"description": "The city name",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	data, err := Convert(um, "gemini-2.5-flash")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+
+	tools, ok := result["tools"].([]interface{})
+	if !ok || len(tools) == 0 {
+		t.Fatal("Expected tools array in result")
+	}
+
+	tool := tools[0].(map[string]interface{})
+	funcDecls, ok := tool["functionDeclarations"].([]interface{})
+	if !ok || len(funcDecls) == 0 {
+		t.Fatal("Expected functionDeclarations in tool")
+	}
+
+	funcDecl := funcDecls[0].(map[string]interface{})
+	if funcDecl["name"] != "get_weather" {
+		t.Errorf("Expected name 'get_weather', got %v", funcDecl["name"])
+	}
+}
+
+func TestConvert_ToolResult(t *testing.T) {
+	um := &types.UnifiedMessage{
+		Model: "gemini-2.5-flash",
+		Messages: []types.MessageRole{
+			{Role: "user", Content: "What's the weather in Tokyo?"},
+			{
+				Role: "assistant",
+				ToolCalls: []types.ToolCall{
+					{
+						ID:   "call_abc123",
+						Type: "function",
+						Function: types.FunctionCall{
+							Name:      "get_weather",
+							Arguments: `{"location": "Tokyo"}`,
+						},
+					},
+				},
+			},
+			{
+				Role:       "tool",
+				Content:    `{"temperature": 25, "unit": "celsius"}`,
+				ToolCallID: "get_weather",
+			},
+		},
+	}
+
+	data, err := Convert(um, "gemini-2.5-flash")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+
+	contents, ok := result["contents"].([]interface{})
+	if !ok {
+		t.Fatal("Expected contents array")
+	}
+
+	thirdMsg := contents[2].(map[string]interface{})
+	if thirdMsg["role"] != "tool" {
+		t.Errorf("Expected role 'tool', got %v", thirdMsg["role"])
+	}
+
+	parts := thirdMsg["parts"].([]interface{})
+	part := parts[0].(map[string]interface{})
+	funcResp, ok := part["functionResponse"].(map[string]interface{})
+	if !ok {
+		t.Fatal("Expected functionResponse part")
+	}
+	if funcResp["name"] != "get_weather" {
+		t.Errorf("Expected functionResponse name 'get_weather', got %v", funcResp["name"])
+	}
 }
 
 func TestGeminiRoundTrip(t *testing.T) {
