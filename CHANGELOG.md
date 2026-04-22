@@ -5,6 +5,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.7.7] - 2026-04-22
+
+### 修复
+- **functionResponse 格式**: `tool` 角色返回的 `functionResponse.response` 字段格式
+  不符合 Gemini API 规范
+  - 之前: `{"name": "func_name", "content": "{\"data\": ...}"}`
+  - 现在: 直接解析为 JSON 对象 `{"data": ...}`，或包装为 `{"output": "..."}`
+  - Gemini API 要求 `response` 字段必须是 `google.protobuf.Struct`（JSON 对象）
+
+---
+
 ## [0.7.6] - 2026-04-22
 
 ### 修复
