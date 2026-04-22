@@ -11,6 +11,7 @@ var unsupportedSchemaFields = []string{
 	"$id",
 	"default",
 	"deprecated",
+	"strict",
 }
 
 // sanitizeSchemaForGemini recursively removes unsupported JSON Schema fields

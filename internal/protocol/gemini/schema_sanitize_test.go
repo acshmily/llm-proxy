@@ -159,6 +159,22 @@ func TestSanitizeSchemaForGemini(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "removes strict",
+			input: map[string]interface{}{
+				"type":      "object",
+				"strict":    false,
+				"properties": map[string]interface{}{
+					"name": map[string]interface{}{"type": "string"},
+				},
+			},
+			expected: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"name": map[string]interface{}{"type": "string"},
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
