@@ -9,12 +9,16 @@ type UnifiedMessage struct {
 	Temperature   float64       `json:"temperature,omitempty"`
 	TopP          float64       `json:"top_p,omitempty"`
 	StopSequences []string      `json:"stop_sequences,omitempty"`
+	Tools         []Tool        `json:"tools,omitempty"`
+	ToolChoice    interface{}   `json:"tool_choice,omitempty"`
 }
 
 // MessageRole 单条消息角色
 type MessageRole struct {
-	Role    string `json:"role"`    // "user" | "assistant"
-	Content string `json:"content"`
+	Role       string     `json:"role"`              // "user" | "assistant" | "tool"
+	Content    string     `json:"content"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
 }
 
 // UnifiedResponse 统一响应格式
@@ -43,4 +47,30 @@ type Usage struct {
 type APIError struct {
 	Type    string `json:"type"`
 	Message string `json:"message"`
+}
+
+// FunctionDefinition 函数定义（OpenAI 格式）
+type FunctionDefinition struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description"`
+	Parameters  map[string]interface{} `json:"parameters"`
+}
+
+// Tool 工具声明
+type Tool struct {
+	Type     string             `json:"type"`     // "function"
+	Function FunctionDefinition `json:"function"`
+}
+
+// FunctionCall 函数调用
+type FunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+// ToolCall 工具调用实例
+type ToolCall struct {
+	ID       string       `json:"id"`
+	Type     string       `json:"type"`     // "function"
+	Function FunctionCall `json:"function"`
 }
