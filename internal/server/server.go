@@ -997,7 +997,10 @@ func convertGeminiSSEToOpenAI(event string, data []byte) []byte {
 	if len(candidate.Content.Parts) > 0 {
 		part := candidate.Content.Parts[0]
 		if part.FunctionCall != nil {
-			args, _ := json.Marshal(part.FunctionCall.Arguments)
+			args, err := json.Marshal(part.FunctionCall.Arguments)
+			if err != nil {
+				return nil
+			}
 			payload := map[string]interface{}{
 				"choices": []map[string]interface{}{
 					{
@@ -1006,7 +1009,7 @@ func convertGeminiSSEToOpenAI(event string, data []byte) []byte {
 							"tool_calls": []map[string]interface{}{
 								{
 									"index": 0,
-									"id":    "call_stream",
+									"id":    fmt.Sprintf("call_%s", part.FunctionCall.Name),
 									"type":  "function",
 									"function": map[string]interface{}{
 										"name":      part.FunctionCall.Name,
