@@ -53,7 +53,7 @@ type APIError struct {
 type FunctionDefinition struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description"`
-	Parameters  map[string]interface{} `json:"parameters"`
+	Parameters  map[string]interface{} `json:"parameters,omitempty"`
 }
 
 // Tool 工具声明
@@ -65,7 +65,7 @@ type Tool struct {
 // FunctionCall 函数调用
 type FunctionCall struct {
 	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
+	Arguments string `json:"arguments"` // JSON-encoded string
 }
 
 // ToolCall 工具调用实例
