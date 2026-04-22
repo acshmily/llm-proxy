@@ -433,6 +433,22 @@ func TestConvert_ToolResult(t *testing.T) {
 	if funcResp["name"] != "get_weather" {
 		t.Errorf("Expected functionResponse name 'get_weather' (looked up from tool_call ID), got %v", funcResp["name"])
 	}
+
+	// Verify response is the parsed JSON object, not wrapped in {"name": ..., "content": ...}
+	respObj := funcResp["response"].(map[string]interface{})
+	if respObj["temperature"] != float64(25) {
+		t.Errorf("Expected response.temperature to be 25, got %v", respObj["temperature"])
+	}
+	if respObj["unit"] != "celsius" {
+		t.Errorf("Expected response.unit to be 'celsius', got %v", respObj["unit"])
+	}
+	// Should NOT have the old "content" or "name" keys
+	if _, ok := respObj["content"]; ok {
+		t.Error("response should not have 'content' key (old format)")
+	}
+	if _, ok := respObj["name"]; ok {
+		t.Error("response should not have 'name' key (old format)")
+	}
 }
 
 func TestConvert_MixedTextAndToolCalls(t *testing.T) {
@@ -720,6 +736,95 @@ func TestConvert_MergeConsecutiveSameRoles(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestConvert_EmbeddedAgentScenario(t *testing.T) {
+	// 模拟 OpenClaw embedded agent 的典型请求：system + user + assistant(tool_calls) + tool
+	um := &types.UnifiedMessage{
+		Model: "gemini-2.5-flash-lite",
+		Messages: []types.MessageRole{
+			{Role: "system", Content: "You are a helpful assistant. Use tools when appropriate."},
+			{Role: "user", Content: "Hello, what can you do?"},
+			{
+				Role: "assistant",
+				ToolCalls: []types.ToolCall{
+					{
+						ID:   "call_abc123",
+						Type: "function",
+						Function: types.FunctionCall{
+							Name:      "get_capabilities",
+							Arguments: `{}`,
+						},
+					},
+				},
+			},
+			{
+				Role:       "tool",
+				Content:    `{"capabilities": ["search", "summarize"]}`,
+				ToolCallID: "call_abc123",
+			},
+		},
+		Tools: []types.Tool{
+			{
+				Type: "function",
+				Function: types.FunctionDefinition{
+					Name:        "get_capabilities",
+					Description: "Get assistant capabilities",
+					Parameters: map[string]interface{}{
+						"type":                 "object",
+						"properties":           map[string]interface{}{},
+						"additionalProperties": false,
+					},
+				},
+			},
+		},
+	}
+
+	data, err := Convert(um, "gemini-2.5-flash-lite")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Logf("Generated JSON:\n%s", string(data))
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+
+	contents := result["contents"].([]interface{})
+	t.Logf("Number of contents: %d", len(contents))
+	for i, c := range contents {
+		cm := c.(map[string]interface{})
+		t.Logf("Content[%d]: role=%v, parts=%v", i, cm["role"], cm["parts"])
+	}
+
+	// 验证：
+	// 1. system + user → 合并为 1 条 user
+	// 2. assistant with toolCalls → 1 条 model
+	// 3. tool → 1 条 tool
+	// 总共应该有 3 条内容
+	if len(contents) != 3 {
+		t.Errorf("Expected 3 contents, got %d", len(contents))
+	}
+
+	// 验证角色交替
+	expectedRoles := []string{"user", "model", "tool"}
+	for i, c := range contents {
+		cm := c.(map[string]interface{})
+		if cm["role"] != expectedRoles[i] {
+			t.Errorf("Content[%d]: expected role '%s', got '%v'", i, expectedRoles[i], cm["role"])
+		}
+	}
+
+	// 验证每条都有非空 parts
+	for i, c := range contents {
+		cm := c.(map[string]interface{})
+		parts := cm["parts"].([]interface{})
+		if len(parts) == 0 {
+			t.Errorf("Content[%d]: has empty parts array", i)
+		}
+	}
 }
 
 func TestGeminiRoundTrip(t *testing.T) {

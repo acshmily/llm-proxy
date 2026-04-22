@@ -136,14 +136,25 @@ func buildGeminiParts(msg types.MessageRole, messages []types.MessageRole) []int
 	// tool 角色：使用 functionResponse
 	if msg.Role == "tool" {
 		funcName := lookupFunctionName(msg.ToolCallID, messages)
+		// Gemini API 要求 response 字段必须是 JSON 对象。
+		// 如果工具返回的内容是 JSON 字符串，尝试解析为对象；
+		// 否则包装在 "output" 字段下。
+		var responseObj map[string]interface{}
+		if msg.Content != "" {
+			if err := json.Unmarshal([]byte(msg.Content), &responseObj); err == nil {
+				// 已经是有效的 JSON 对象
+			} else {
+				// 不是 JSON 对象，包装起来
+				responseObj = map[string]interface{}{"output": msg.Content}
+			}
+		} else {
+			responseObj = map[string]interface{}{}
+		}
 		return []interface{}{
 			map[string]interface{}{
 				"functionResponse": map[string]interface{}{
-					"name": funcName,
-					"response": map[string]interface{}{
-						"name":    funcName,
-						"content": msg.Content,
-					},
+					"name":     funcName,
+					"response": responseObj,
 				},
 			},
 		}
