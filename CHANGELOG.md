@@ -5,6 +5,16 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.7.5] - 2026-04-22
+
+### 修复
+- **Completions 端点工具调用**: `/v1/completions` 未解析 `tools`、`tool_calls`、`tool_call_id` 字段
+  - OpenClaw 使用 completions 端点 + `messages` 格式发送工具调用请求
+  - 之前 `tools` 被忽略导致 Gemini 返回 400 错误
+  - 现在正确解析工具定义和工具调用历史，与 `/v1/chat/completions` 行为一致
+
+---
+
 ## [0.7.4] - 2026-04-22
 
 ### 修复
@@ -341,11 +351,12 @@
 
 ## 升级指南
 
-### 从 v0.7.x 升级到 v0.7.4
+### 从 v0.7.x 升级到 v0.7.5
 
 **无破坏性变更。**
 
 **修复内容：**
+- Completions 端点工具调用支持（OpenClaw embedded agent 400 错误修复）
 - Gemini 原生端点后端认证（403 错误修复）
 - Header 转发安全加固（白名单策略）
 - BaseURL 尾部斜杠路径拼接修复

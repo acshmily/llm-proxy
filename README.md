@@ -617,7 +617,19 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ## 版本升级
 
-### v0.7.3 → v0.7.4（最新）
+### v0.7.4 → v0.7.5（最新）
+
+**无破坏性变更** - 配置完全向后兼容。
+
+**修复：**
+- `/v1/completions` 端点工具调用支持，OpenClaw embedded agent 不再返回 400 错误
+
+**升级步骤：**
+1. 停止旧版本服务
+2. 部署 v0.7.5 二进制文件或 Docker 镜像
+3. 重启服务（`config.yaml` 无需修改）
+
+### v0.7.3 → v0.7.4
 
 **无破坏性变更** - 配置完全向后兼容。
 
