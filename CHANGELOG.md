@@ -5,6 +5,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.7.1] - 2026-04-22
+
+### 修复
+- **Gemini 工具定义兼容性**: 清理工具参数中 Gemini 不支持的 JSON Schema 字段
+  - 自动剥离 `additionalProperties`、`$ref`、`$schema`、`$id`、`default`、`deprecated`、`patternProperties`、`propertyNames`
+  - 递归处理嵌套 properties 和 `anyOf`/`oneOf` 数组中的 schema
+  - 修复 nil Parameters 导致输出 `null` 的问题
+  - 解决 OpenClaw 大量 MCP 工具定义触发 400 Bad Request 的问题
+
+---
+
 ## [0.7.0] - 2026-04-22
 
 ### 新增
