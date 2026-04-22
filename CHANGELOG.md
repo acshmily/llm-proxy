@@ -5,6 +5,15 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.7.9] - 2026-04-22
+
+### 新增
+- **后端请求/响应调试日志**: 开启 `debug_requests` 后，记录发送到后端的实际请求体和从后端接收的响应体
+  - 使用 `debug_max_body` 控制日志最大字节数（默认 1024）
+  - 方便排查 400 等错误时的实际 payload
+
+---
+
 ## [0.7.8] - 2026-04-22
 
 ### 修复
