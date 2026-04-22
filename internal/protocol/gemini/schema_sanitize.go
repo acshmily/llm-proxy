@@ -38,6 +38,16 @@ func sanitizeSchemaForGemini(schema map[string]interface{}) map[string]interface
 		switch val := v.(type) {
 		case map[string]interface{}:
 			result[k] = sanitizeSchemaForGemini(val)
+		case []interface{}:
+			sanitized := make([]interface{}, len(val))
+			for i, elem := range val {
+				if m, ok := elem.(map[string]interface{}); ok {
+					sanitized[i] = sanitizeSchemaForGemini(m)
+				} else {
+					sanitized[i] = elem
+				}
+			}
+			result[k] = sanitized
 		default:
 			result[k] = v
 		}

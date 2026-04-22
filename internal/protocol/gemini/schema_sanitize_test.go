@@ -26,10 +26,10 @@ func TestSanitizeSchemaForGemini(t *testing.T) {
 		{
 			name: "removes $ref and $schema",
 			input: map[string]interface{}{
-				"type":      "object",
-				"$ref":      "#/definitions/User",
-				"$schema":   "http://json-schema.org/draft-07/schema#",
-				"$id":       "user-schema",
+				"type":        "object",
+				"$ref":        "#/definitions/User",
+				"$schema":     "http://json-schema.org/draft-07/schema#",
+				"$id":         "user-schema",
 				"description": "A user",
 			},
 			expected: map[string]interface{}{
@@ -69,9 +69,9 @@ func TestSanitizeSchemaForGemini(t *testing.T) {
 						"additionalProperties": false,
 						"properties": map[string]interface{}{
 							"city": map[string]interface{}{
-								"type":      "string",
-								"default":   "unknown",
-								"$ref":      "#/definitions/City",
+								"type":    "string",
+								"default": "unknown",
+								"$ref":    "#/definitions/City",
 							},
 						},
 					},
@@ -141,6 +141,23 @@ func TestSanitizeSchemaForGemini(t *testing.T) {
 			name:     "handles empty object",
 			input:    map[string]interface{}{},
 			expected: map[string]interface{}{},
+		},
+		{
+			name: "sanitizes maps inside anyOf array",
+			input: map[string]interface{}{
+				"type": "string",
+				"anyOf": []interface{}{
+					map[string]interface{}{"type": "string"},
+					map[string]interface{}{"type": "number", "additionalProperties": false},
+				},
+			},
+			expected: map[string]interface{}{
+				"type": "string",
+				"anyOf": []interface{}{
+					map[string]interface{}{"type": "string"},
+					map[string]interface{}{"type": "number"},
+				},
+			},
 		},
 	}
 
