@@ -10,7 +10,7 @@ import (
 type OpenAIFunctionDef struct {
 	Name        string                 `json:"name"`
 	Description string                 `json:"description"`
-	Parameters  map[string]interface{} `json:"parameters"`
+	Parameters  map[string]interface{} `json:"parameters,omitempty"`
 }
 
 // OpenAITool OpenAI 工具声明
@@ -19,14 +19,17 @@ type OpenAITool struct {
 	Function OpenAIFunctionDef `json:"function"`
 }
 
+// ToolCallFunctionRef OpenAI 格式的工具调用函数引用
+type ToolCallFunctionRef struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
 // ToolCallRef OpenAI 格式的工具调用引用
 type ToolCallRef struct {
-	ID       string `json:"id"`
-	Type     string `json:"type"`
-	Function struct {
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
-	} `json:"function"`
+	ID       string            `json:"id"`
+	Type     string            `json:"type"`
+	Function ToolCallFunctionRef `json:"function"`
 }
 
 // OpenAIRequest OpenAI API 请求格式

@@ -71,16 +71,9 @@ func TestParseRequest_WithTools(t *testing.T) {
 	}`)
 
 	unified, err := ParseRequest(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if len(unified.Tools) != 1 {
-		t.Fatalf("Expected 1 tool, got %d", len(unified.Tools))
-	}
-	if unified.Tools[0].Function.Name != "get_weather" {
-		t.Errorf("Expected tool name 'get_weather', got %s", unified.Tools[0].Function.Name)
-	}
+	assert.NoError(t, err)
+	assert.Len(t, unified.Tools, 1)
+	assert.Equal(t, "get_weather", unified.Tools[0].Function.Name)
 }
 
 func TestParseRequest_WithToolCalls(t *testing.T) {
@@ -105,25 +98,22 @@ func TestParseRequest_WithToolCalls(t *testing.T) {
 	}`)
 
 	unified, err := ParseRequest(data)
-	if err != nil {
-		t.Fatal(err)
-	}
+	assert.NoError(t, err)
+	assert.Len(t, unified.Messages[1].ToolCalls, 1)
+	assert.Equal(t, "get_weather", unified.Messages[1].ToolCalls[0].Function.Name)
+	assert.Equal(t, "tool", unified.Messages[2].Role)
+	assert.Equal(t, "call_abc", unified.Messages[2].ToolCallID)
+}
 
-	// Check assistant message tool_calls
-	if len(unified.Messages[1].ToolCalls) != 1 {
-		t.Fatalf("Expected 1 tool_call in assistant message")
-	}
-	if unified.Messages[1].ToolCalls[0].Function.Name != "get_weather" {
-		t.Errorf("Expected function name 'get_weather'")
-	}
+func TestParseRequest_NoTools(t *testing.T) {
+	data := []byte(`{
+		"model": "gpt-4",
+		"messages": [{"role": "user", "content": "Hello"}]
+	}`)
 
-	// Check tool role
-	if unified.Messages[2].Role != "tool" {
-		t.Errorf("Expected role 'tool', got %s", unified.Messages[2].Role)
-	}
-	if unified.Messages[2].ToolCallID != "call_abc" {
-		t.Errorf("Expected tool_call_id 'call_abc', got %s", unified.Messages[2].ToolCallID)
-	}
+	unified, err := ParseRequest(data)
+	assert.NoError(t, err)
+	assert.Len(t, unified.Tools, 0)
 }
 
 func TestParseRequest_WithAllParameters(t *testing.T) {
