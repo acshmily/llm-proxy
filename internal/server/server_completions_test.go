@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -714,4 +715,99 @@ data: {"candidates":[{"content":{"parts":[{}]},"finishReason":"STOP"}]}
 	assert.Contains(t, receivedPath, ":streamGenerateContent", "/v1/messages should also use streamGenerateContent for streaming")
 	assert.Contains(t, receivedQuery, "alt=sse", "/v1/messages should also request SSE format")
 	assert.Equal(t, http.StatusOK, rr.Code)
+}
+
+func TestServer_CompletionsRequest_ArrayContentFormat(t *testing.T) {
+	// OpenClaw openai-completions mode sends messages with array-style content
+	// messages[].content = [{"type": "text", "text": "..."}]
+	var receivedBody []byte
+	mockBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"candidates": [{"content": {"parts": [{"text": "Hello OpenClaw"}], "role": "model"}, "finishReason": "STOP"}]}`))
+	}))
+	defer mockBackend.Close()
+
+	cfg := &config.Config{
+		Routes: []config.RouteConfig{{
+			APIKey:      "sk-test-key",
+			Backend:     "gemini",
+			BackendKey:  "gemini-key",
+			Timeout:     30000000000,
+		}},
+		Backends: config.BackendsConfig{
+			Gemini: config.BackendConfig{BaseURL: mockBackend.URL},
+		},
+	}
+
+	r := router.New(cfg.Routes)
+	log := logger.New(logger.TEXT, logger.INFO)
+	srv := New(cfg, r, log)
+
+	reqBody := []byte(`{
+		"model": "gemini-pro",
+		"messages": [
+			{"role": "user", "content": [{"type": "text", "text": "Hello OpenClaw"}]}
+		]
+	}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/completions", bytes.NewReader(reqBody))
+	req.Header.Set("Authorization", "Bearer sk-test-key")
+	req.Header.Set("Content-Type", "application/json")
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	// Verify the backend received the properly formatted request
+	assert.Contains(t, string(receivedBody), `"text":"Hello OpenClaw"`)
+}
+
+func TestServer_CompletionsRequest_MultiPartContent(t *testing.T) {
+	// Multi-part content: multiple text blocks should be concatenated
+	var receivedBody []byte
+	mockBackend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedBody, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"candidates": [{"content": {"parts": [{"text": "Combined response"}], "role": "model"}, "finishReason": "STOP"}]}`))
+	}))
+	defer mockBackend.Close()
+
+	cfg := &config.Config{
+		Routes: []config.RouteConfig{{
+			APIKey:      "sk-test-key",
+			Backend:     "gemini",
+			BackendKey:  "gemini-key",
+			Timeout:     30000000000,
+		}},
+		Backends: config.BackendsConfig{
+			Gemini: config.BackendConfig{BaseURL: mockBackend.URL},
+		},
+	}
+
+	r := router.New(cfg.Routes)
+	log := logger.New(logger.TEXT, logger.INFO)
+	srv := New(cfg, r, log)
+
+	reqBody := []byte(`{
+		"model": "gemini-pro",
+		"messages": [
+			{"role": "user", "content": [
+				{"type": "text", "text": "Part one. "},
+				{"type": "text", "text": "Part two. "},
+				{"type": "text", "text": "Part three."}
+			]}
+		]
+	}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/completions", bytes.NewReader(reqBody))
+	req.Header.Set("Authorization", "Bearer sk-test-key")
+	req.Header.Set("Content-Type", "application/json")
+
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	assert.Equal(t, http.StatusOK, rr.Code)
+	// Verify backend received concatenated content (JSON marshal removes trailing spaces)
+	assert.Contains(t, string(receivedBody), `"text":"Part one. Part two. Part three."`)
 }

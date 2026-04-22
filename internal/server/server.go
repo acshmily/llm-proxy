@@ -396,9 +396,10 @@ func (s *Server) serveCompletionsRequest(w http.ResponseWriter, r *http.Request)
 	}
 
 	// 解析请求，兼容 prompt 和 messages 两种格式
+	// Content 使用 json.RawMessage 兼容字符串和数组两种格式
 	type rawMsg struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
 	}
 	var rawRequest struct {
 		Model       string   `json:"model"`
@@ -421,10 +422,10 @@ func (s *Server) serveCompletionsRequest(w http.ResponseWriter, r *http.Request)
 		// prompt 格式：包装为单条 user 消息
 		messages = []types.MessageRole{{Role: "user", Content: rawRequest.Prompt}}
 	} else if len(rawRequest.Messages) > 0 {
-		// messages 格式：直接使用
+		// messages 格式：提取 content 文本
 		messages = make([]types.MessageRole, len(rawRequest.Messages))
 		for i, msg := range rawRequest.Messages {
-			messages[i] = types.MessageRole{Role: msg.Role, Content: msg.Content}
+			messages[i] = types.MessageRole{Role: msg.Role, Content: extractContent(msg.Content)}
 		}
 	}
 
@@ -1296,4 +1297,33 @@ func getDefaultModel(backend string) string {
 	default:
 		return ""
 	}
+}
+
+// extractContent extracts text content from either a JSON string or an array of content blocks.
+// OpenClaw sends array format: [{"type": "text", "text": "..."}]
+// Standard clients send string format: "Hello"
+func extractContent(content json.RawMessage) string {
+	if len(content) == 0 {
+		return ""
+	}
+	// Try string format first
+	var str string
+	if err := json.Unmarshal(content, &str); err == nil {
+		return str
+	}
+	// Try array format
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(content, &blocks); err == nil {
+		var result string
+		for _, b := range blocks {
+			if b.Type == "text" && b.Text != "" {
+				result += b.Text
+			}
+		}
+		return result
+	}
+	return ""
 }
