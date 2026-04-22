@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptrace"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -155,6 +156,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/v1/messages" && r.Method == http.MethodPost:
 		// 现有 Anthropic 端点
 		s.serveRequest(w, r)
+		return
+	case strings.HasPrefix(r.URL.Path, "/v1beta/models/") && r.Method == http.MethodPost:
+		s.serveGeminiRequest(w, r)
 		return
 	default:
 		s.writeError(w, http.StatusNotFound, "Endpoint not found")
@@ -709,6 +713,93 @@ func (s *Server) handleOpenAIStream(w http.ResponseWriter, resp *http.Response, 
 			}
 		}
 	})
+}
+
+// serveGeminiRequest forwards Gemini native protocol requests directly to Gemini backend.
+// Clients use the native Gemini API format - no protocol conversion needed.
+func (s *Server) serveGeminiRequest(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+
+	// 获取 API Key
+	apiKey := r.Header.Get("x-api-key")
+	if apiKey == "" {
+		apiKey = extractBearerToken(r.Header.Get("Authorization"))
+	}
+
+	route, found := s.router.FindRoute(apiKey)
+	if !found {
+		s.writeError(w, http.StatusUnauthorized, "Invalid API key")
+		return
+	}
+
+	// 只路由到 Gemini 后端
+	if route.Backend != "gemini" {
+		s.writeError(w, http.StatusBadRequest, "This endpoint only supports Gemini backend")
+		return
+	}
+
+	// 读取请求体
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, "Failed to read request body")
+		return
+	}
+
+	s.logRequestBody(r.URL.Path, body)
+
+	// 直接转发请求路径（/v1beta/models/... -> backend BaseURL + path）
+	backendURL := s.cfg.Backends.Gemini.BaseURL + r.URL.Path
+	if r.URL.RawQuery != "" {
+		backendURL += "?" + r.URL.RawQuery
+	}
+
+	// 创建后端请求
+	backendReq, err := http.NewRequest(r.Method, backendURL, bytes.NewReader(body))
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "Failed to create backend request")
+		return
+	}
+
+	// 复制原始请求的 headers（除了客户端认证相关）
+	for k, v := range r.Header {
+		if k != "Authorization" && k != "X-Api-Key" && k != "Host" {
+			backendReq.Header[k] = v
+		}
+	}
+	backendReq.Header.Set("Content-Type", "application/json")
+
+	// 添加超时
+	ctx, cancel := context.WithTimeout(r.Context(), route.Timeout)
+	defer cancel()
+	backendReq = backendReq.WithContext(ctx)
+
+	// 发送请求
+	resp, err := s.client.Do(backendReq)
+	if err != nil {
+		s.writeError(w, http.StatusBadGateway, "Failed to reach backend")
+		return
+	}
+	defer resp.Body.Close()
+
+	latency := time.Since(start).Milliseconds()
+
+	// 转发响应头
+	for k, vv := range resp.Header {
+		if k != "Content-Length" {
+			for _, v := range vv {
+				w.Header().Add(k, v)
+			}
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+
+	// 记录日志
+	s.log.Info("Gemini native request completed",
+		logger.LogField{Key: "status_code", Value: resp.StatusCode},
+		logger.LogField{Key: "backend", Value: route.Backend},
+		logger.LogField{Key: "latency_ms", Value: latency},
+	)
 }
 
 // handleCompletionsNonStream 处理 Completions 非流式响应（/v1/completions）
