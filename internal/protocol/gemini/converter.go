@@ -42,7 +42,7 @@ func Convert(um *types.UnifiedMessage, modelOverride string) ([]byte, error) {
 			funcDeclarations[i] = map[string]interface{}{
 				"name":        tool.Function.Name,
 				"description": tool.Function.Description,
-				"parameters":  tool.Function.Parameters,
+				"parameters":  sanitizeSchemaForGemini(tool.Function.Parameters),
 			}
 		}
 		req["tools"] = []map[string]interface{}{

@@ -311,6 +311,68 @@ func TestConvert_WithTools(t *testing.T) {
 	}
 }
 
+func TestConvert_SanitizesToolSchema(t *testing.T) {
+	um := &types.UnifiedMessage{
+		Model: "gemini-2.5-flash",
+		Messages: []types.MessageRole{
+			{Role: "user", Content: "Get weather"},
+		},
+		Tools: []types.Tool{
+			{
+				Type: "function",
+				Function: types.FunctionDefinition{
+					Name:        "get_weather",
+					Description: "Get weather",
+					Parameters: map[string]interface{}{
+						"type":                 "object",
+						"additionalProperties": false,
+						"properties": map[string]interface{}{
+							"location": map[string]interface{}{
+								"type":      "string",
+								"default":   "unknown",
+								"$ref":      "#/definitions/Location",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	data, err := Convert(um, "gemini-2.5-flash")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+
+	tools := result["tools"].([]interface{})
+	tool := tools[0].(map[string]interface{})
+	funcDecls := tool["functionDeclarations"].([]interface{})
+	params := funcDecls[0].(map[string]interface{})["parameters"].(map[string]interface{})
+
+	// Verify unsupported fields are removed
+	if _, ok := params["additionalProperties"]; ok {
+		t.Error("Expected additionalProperties to be removed")
+	}
+
+	location := params["properties"].(map[string]interface{})["location"].(map[string]interface{})
+	if _, ok := location["default"]; ok {
+		t.Error("Expected default to be removed")
+	}
+	if _, ok := location["$ref"]; ok {
+		t.Error("Expected $ref to be removed")
+	}
+
+	// Verify valid fields are preserved
+	if params["type"] != "object" {
+		t.Errorf("Expected type 'object', got %v", params["type"])
+	}
+}
+
 func TestConvert_ToolResult(t *testing.T) {
 	um := &types.UnifiedMessage{
 		Model: "gemini-2.5-flash",
