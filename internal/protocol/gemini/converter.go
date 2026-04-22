@@ -78,7 +78,9 @@ func buildGeminiPart(msg types.MessageRole) map[string]interface{} {
 	if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
 		if msg.Content == "" && len(msg.ToolCalls) == 1 {
 			var args map[string]interface{}
-			json.Unmarshal([]byte(msg.ToolCalls[0].Function.Arguments), &args)
+			if err := json.Unmarshal([]byte(msg.ToolCalls[0].Function.Arguments), &args); err != nil {
+				args = make(map[string]interface{})
+			}
 			return map[string]interface{}{
 				"functionCall": map[string]interface{}{
 					"name":      msg.ToolCalls[0].Function.Name,
