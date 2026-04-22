@@ -39,11 +39,14 @@ func Convert(um *types.UnifiedMessage, modelOverride string) ([]byte, error) {
 	if len(um.Tools) > 0 {
 		funcDeclarations := make([]map[string]interface{}, len(um.Tools))
 		for i, tool := range um.Tools {
-			funcDeclarations[i] = map[string]interface{}{
+			funcDecl := map[string]interface{}{
 				"name":        tool.Function.Name,
 				"description": tool.Function.Description,
-				"parameters":  sanitizeSchemaForGemini(tool.Function.Parameters),
 			}
+			if params := sanitizeSchemaForGemini(tool.Function.Parameters); params != nil {
+				funcDecl["parameters"] = params
+			}
+			funcDeclarations[i] = funcDecl
 		}
 		req["tools"] = []map[string]interface{}{
 			{"functionDeclarations": funcDeclarations},
