@@ -29,6 +29,7 @@ type UnifiedResponse struct {
 	Role         string         `json:"role"`
 	FinishReason string         `json:"finish_reason,omitempty"`
 	Usage        Usage          `json:"usage"`
+	ToolCalls    []ToolCall     `json:"tool_calls,omitempty"`
 }
 
 // ContentBlock 内容块

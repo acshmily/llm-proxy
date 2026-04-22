@@ -235,10 +235,26 @@ func TestParseResponse_WithFunctionCall(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Current ParseResponse only handles text part, functionCall should be ignored
-	// This test verifies it doesn't panic or crash
-	if resp == nil {
-		t.Fatal("Expected non-nil response")
+	if len(resp.ToolCalls) != 1 {
+		t.Fatalf("Expected 1 tool_call, got %d", len(resp.ToolCalls))
+	}
+
+	tc := resp.ToolCalls[0]
+	if tc.ID == "" {
+		t.Error("Expected non-empty tool_call ID")
+	}
+	if tc.Function.Name != "get_weather" {
+		t.Errorf("Expected function name 'get_weather', got '%s'", tc.Function.Name)
+	}
+
+	expectedArgs := `{"location":"Tokyo"}`
+	if tc.Function.Arguments != expectedArgs {
+		t.Errorf("Expected arguments '%s', got '%s'", expectedArgs, tc.Function.Arguments)
+	}
+
+	// Should have no text content
+	if len(resp.Content) != 0 {
+		t.Errorf("Expected 0 text content blocks, got %d", len(resp.Content))
 	}
 }
 
@@ -316,7 +332,7 @@ func TestConvert_ToolResult(t *testing.T) {
 			{
 				Role:       "tool",
 				Content:    `{"temperature": 25, "unit": "celsius"}`,
-				ToolCallID: "get_weather",
+				ToolCallID: "call_abc123", // matches the assistant's tool_call ID, not the function name
 			},
 		},
 	}
@@ -348,7 +364,128 @@ func TestConvert_ToolResult(t *testing.T) {
 		t.Fatal("Expected functionResponse part")
 	}
 	if funcResp["name"] != "get_weather" {
-		t.Errorf("Expected functionResponse name 'get_weather', got %v", funcResp["name"])
+		t.Errorf("Expected functionResponse name 'get_weather' (looked up from tool_call ID), got %v", funcResp["name"])
+	}
+}
+
+func TestConvert_MixedTextAndToolCalls(t *testing.T) {
+	um := &types.UnifiedMessage{
+		Model: "gemini-2.5-flash",
+		Messages: []types.MessageRole{
+			{Role: "user", Content: "Get weather for Tokyo"},
+			{
+				Role:    "assistant",
+				Content: "Let me check the weather for you.",
+				ToolCalls: []types.ToolCall{
+					{
+						ID:   "call_abc",
+						Type: "function",
+						Function: types.FunctionCall{
+							Name:      "get_weather",
+							Arguments: `{"location": "Tokyo"}`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	data, err := Convert(um, "gemini-2.5-flash")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+
+	contents := result["contents"].([]interface{})
+	secondMsg := contents[1].(map[string]interface{})
+	parts := secondMsg["parts"].([]interface{})
+
+	// Should have 2 parts: text + functionCall
+	if len(parts) != 2 {
+		t.Fatalf("Expected 2 parts (text + functionCall), got %d", len(parts))
+	}
+
+	// First part should be text
+	textPart := parts[0].(map[string]interface{})
+	if textPart["text"] != "Let me check the weather for you." {
+		t.Errorf("Expected text part with content, got %v", textPart["text"])
+	}
+
+	// Second part should be functionCall
+	funcPart := parts[1].(map[string]interface{})
+	if _, ok := funcPart["functionCall"]; !ok {
+		t.Error("Expected functionCall part as second part")
+	}
+}
+
+func TestConvert_MultipleToolCalls(t *testing.T) {
+	um := &types.UnifiedMessage{
+		Model: "gemini-2.5-flash",
+		Messages: []types.MessageRole{
+			{Role: "user", Content: "Get weather for Tokyo and Paris"},
+			{
+				Role: "assistant",
+				ToolCalls: []types.ToolCall{
+					{
+						ID:   "call_abc",
+						Type: "function",
+						Function: types.FunctionCall{
+							Name:      "get_weather",
+							Arguments: `{"location": "Tokyo"}`,
+						},
+					},
+					{
+						ID:   "call_def",
+						Type: "function",
+						Function: types.FunctionCall{
+							Name:      "get_weather",
+							Arguments: `{"location": "Paris"}`,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	data, err := Convert(um, "gemini-2.5-flash")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+
+	contents, ok := result["contents"].([]interface{})
+	if !ok {
+		t.Fatal("Expected contents array")
+	}
+	if len(contents) != 2 {
+		t.Fatalf("Expected 2 contents, got %d", len(contents))
+	}
+
+	// 第二条消息应该有 2 个 functionCall parts
+	secondMsg := contents[1].(map[string]interface{})
+	if secondMsg["role"] != "model" {
+		t.Errorf("Expected role 'model', got %v", secondMsg["role"])
+	}
+
+	parts := secondMsg["parts"].([]interface{})
+	if len(parts) != 2 {
+		t.Fatalf("Expected 2 parts for multiple tool_calls, got %d", len(parts))
+	}
+
+	// 验证两个 parts 都是 functionCall
+	for i, part := range parts {
+		p := part.(map[string]interface{})
+		if _, ok := p["functionCall"]; !ok {
+			t.Errorf("Expected functionCall at index %d", i)
+		}
 	}
 }
 

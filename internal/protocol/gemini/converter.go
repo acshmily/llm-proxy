@@ -24,10 +24,10 @@ func Convert(um *types.UnifiedMessage, modelOverride string) ([]byte, error) {
 	// Gemini 使用 contents 数组
 	contents := make([]map[string]interface{}, len(um.Messages))
 	for i, msg := range um.Messages {
-		part := buildGeminiPart(msg)
+		parts := buildGeminiParts(msg, um.Messages)
 		contents[i] = map[string]interface{}{
 			"role":  mapToGeminiRole(msg.Role),
-			"parts": []interface{}{part},
+			"parts": parts,
 		}
 	}
 
@@ -59,41 +59,70 @@ func Convert(um *types.UnifiedMessage, modelOverride string) ([]byte, error) {
 	return json.Marshal(req)
 }
 
-// buildGeminiPart 根据消息内容构建 Gemini part
-func buildGeminiPart(msg types.MessageRole) map[string]interface{} {
+// buildGeminiParts 根据消息内容构建 Gemini parts（支持多个）
+func buildGeminiParts(msg types.MessageRole, messages []types.MessageRole) []interface{} {
 	// tool 角色：使用 functionResponse
 	if msg.Role == "tool" {
-		return map[string]interface{}{
-			"functionResponse": map[string]interface{}{
-				"name": msg.ToolCallID,
-				"response": map[string]interface{}{
-					"name":    msg.ToolCallID,
-					"content": msg.Content,
+		funcName := lookupFunctionName(msg.ToolCallID, messages)
+		return []interface{}{
+			map[string]interface{}{
+				"functionResponse": map[string]interface{}{
+					"name": funcName,
+					"response": map[string]interface{}{
+						"name":    funcName,
+						"content": msg.Content,
+					},
 				},
 			},
 		}
 	}
 
-	// assistant 带 tool_calls：使用 functionCall
+	// assistant 带 tool_calls：为每个 tool_call 生成一个 functionCall part
 	if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
-		if msg.Content == "" && len(msg.ToolCalls) == 1 {
+		var parts []interface{}
+		// 先加入文本 part（如果有）
+		if msg.Content != "" {
+			parts = append(parts, map[string]interface{}{
+				"text": msg.Content,
+			})
+		}
+		// 追加所有 functionCall parts
+		for _, tc := range msg.ToolCalls {
 			var args map[string]interface{}
-			if err := json.Unmarshal([]byte(msg.ToolCalls[0].Function.Arguments), &args); err != nil {
+			if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
 				args = make(map[string]interface{})
 			}
-			return map[string]interface{}{
+			parts = append(parts, map[string]interface{}{
 				"functionCall": map[string]interface{}{
-					"name":      msg.ToolCalls[0].Function.Name,
+					"name":      tc.Function.Name,
 					"arguments": args,
 				},
-			}
+			})
 		}
+		return parts
 	}
 
 	// 默认：文本 part
-	return map[string]interface{}{
-		"text": msg.Content,
+	return []interface{}{
+		map[string]interface{}{
+			"text": msg.Content,
+		},
 	}
+}
+
+// lookupFunctionName 通过 tool_call_id 从 assistant 消息中查找函数名
+func lookupFunctionName(toolCallID string, messages []types.MessageRole) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == "assistant" {
+			for _, tc := range messages[i].ToolCalls {
+				if tc.ID == toolCallID {
+					return tc.Function.Name
+				}
+			}
+		}
+	}
+	// 如果未找到匹配的，退回使用 tool_call_id
+	return toolCallID
 }
 
 // ParseResponse 解析 Gemini 响应
@@ -104,13 +133,28 @@ func ParseResponse(data []byte, model string) (*types.UnifiedResponse, error) {
 	}
 
 	var content []types.ContentBlock
+	var toolCalls []types.ToolCall
 	var finishReason string
-	if len(resp.Candidates) > 0 && len(resp.Candidates[0].Content.Parts) > 0 {
-		content = append(content, types.ContentBlock{
-			Type: "text",
-			Text: resp.Candidates[0].Content.Parts[0].Text,
-		})
-		// 映射 Gemini finish_reason 到 OpenAI 标准值
+
+	if len(resp.Candidates) > 0 {
+		for i, part := range resp.Candidates[0].Content.Parts {
+			if part.FunctionCall != nil {
+				args, _ := json.Marshal(part.FunctionCall.Arguments)
+				toolCalls = append(toolCalls, types.ToolCall{
+					ID:   fmt.Sprintf("call_%s_%d", part.FunctionCall.Name, i),
+					Type: "function",
+					Function: types.FunctionCall{
+						Name:      part.FunctionCall.Name,
+						Arguments: string(args),
+					},
+				})
+			} else if part.Text != "" {
+				content = append(content, types.ContentBlock{
+					Type: "text",
+					Text: part.Text,
+				})
+			}
+		}
 		finishReason = mapGeminiFinishReason(resp.Candidates[0].FinishReason)
 	}
 
@@ -120,6 +164,7 @@ func ParseResponse(data []byte, model string) (*types.UnifiedResponse, error) {
 		Content:      content,
 		Role:         "assistant",
 		FinishReason: finishReason,
+		ToolCalls:    toolCalls,
 	}, nil
 }
 
@@ -151,5 +196,11 @@ type Content struct {
 }
 
 type Part struct {
-	Text string `json:"text"`
+	Text         string                 `json:"text"`
+	FunctionCall *FunctionCallPart      `json:"functionCall,omitempty"`
+}
+
+type FunctionCallPart struct {
+	Name      string                 `json:"name"`
+	Arguments map[string]interface{} `json:"arguments"`
 }

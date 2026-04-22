@@ -5,6 +5,23 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.7.0] - 2026-04-22
+
+### 新增
+- **Gemini Function Calling 支持**: 完整支持 Gemini 工具调用协议
+  - OpenAI `tools`/`tool_calls`/`tool` 角色自动映射到 Gemini `functionDeclarations`/`functionCall`/`functionResponse`
+  - 支持多 tool_calls 同时发送（并行工具调用）
+  - 支持 assistant 消息混合 text + tool_calls 内容
+  - 流式响应中 functionCall 自动转换为 OpenAI `tool_calls` delta 格式
+  - 非流式响应正确提取 functionCall 到 `ToolCalls` 字段
+  - `tool_call_id` 自动解析为函数名（通过回溯消息历史）
+- **SSE 转换器单元测试**: 覆盖文本、functionCall、finish_reason 等场景
+
+### 改进
+- ToolCall ID 使用唯一标识符（`call_<name>_<index>`），避免多工具调用时 ID 冲突
+
+---
+
 ## [0.6.2] - 2026-04-22
 
 ### 新增
