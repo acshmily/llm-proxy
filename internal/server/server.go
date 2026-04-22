@@ -17,9 +17,9 @@ import (
 	"github.com/claude-projetc/llm-proxy/internal/logger"
 	"github.com/claude-projetc/llm-proxy/internal/middleware"
 	"github.com/claude-projetc/llm-proxy/internal/protocol/anthropic"
-	"github.com/claude-projetc/llm-proxy/internal/protocol/openai"
 	"github.com/claude-projetc/llm-proxy/internal/protocol/claude"
 	"github.com/claude-projetc/llm-proxy/internal/protocol/gemini"
+	"github.com/claude-projetc/llm-proxy/internal/protocol/openai"
 	"github.com/claude-projetc/llm-proxy/internal/router"
 	"github.com/claude-projetc/llm-proxy/internal/stream"
 	"github.com/claude-projetc/llm-proxy/pkg/types"
@@ -39,10 +39,10 @@ type Server struct {
 
 // PoolStats 连接池统计
 type PoolStats struct {
-	mu            sync.Mutex
-	requests      int
-	reusedCount   int
-	createCount   int
+	mu          sync.Mutex
+	requests    int
+	reusedCount int
+	createCount int
 }
 
 func (p *PoolStats) RecordRequest(reused bool) {
@@ -65,10 +65,10 @@ func (p *PoolStats) GetStats() (int, int, int) {
 func New(cfg *config.Config, r *router.Router, log *logger.Logger) *Server {
 	// 配置 HTTP 连接池
 	transport := &http.Transport{
-		MaxIdleConns:        100,              // 最大空闲连接数
-		MaxIdleConnsPerHost: 10,               // 每个主机的最大空闲连接数
-		IdleConnTimeout:     90 * time.Second, // 空闲连接超时时间
-		TLSHandshakeTimeout: 10 * time.Second, // TLS 握手超时
+		MaxIdleConns:          100,              // 最大空闲连接数
+		MaxIdleConnsPerHost:   10,               // 每个主机的最大空闲连接数
+		IdleConnTimeout:       90 * time.Second, // 空闲连接超时时间
+		TLSHandshakeTimeout:   10 * time.Second, // TLS 握手超时
 		ExpectContinueTimeout: 1 * time.Second,
 		ForceAttemptHTTP2:     true,
 	}
@@ -457,12 +457,12 @@ func (s *Server) serveCompletionsRequest(w http.ResponseWriter, r *http.Request)
 	}
 
 	unified := &types.UnifiedMessage{
-		Model:    rawRequest.Model,
-		Stream:   rawRequest.Stream,
-		Messages: messages,
-		MaxTokens: rawRequest.MaxTokens,
-		Temperature: rawRequest.Temperature,
-		TopP:     rawRequest.TopP,
+		Model:         rawRequest.Model,
+		Stream:        rawRequest.Stream,
+		Messages:      messages,
+		MaxTokens:     rawRequest.MaxTokens,
+		Temperature:   rawRequest.Temperature,
+		TopP:          rawRequest.TopP,
 		StopSequences: rawRequest.Stop,
 	}
 
@@ -748,7 +748,14 @@ func (s *Server) serveGeminiRequest(w http.ResponseWriter, r *http.Request) {
 	s.logRequestBody(r.URL.Path, body)
 
 	// 直接转发请求路径（/v1beta/models/... -> backend BaseURL + path）
-	backendURL := s.cfg.Backends.Gemini.BaseURL + r.URL.Path
+	// 规范化路径拼接：BaseURL 可能已包含 /v1beta，需要避免重复
+	baseURL := strings.TrimSuffix(s.cfg.Backends.Gemini.BaseURL, "/")
+	path := strings.TrimPrefix(r.URL.Path, "/")
+	// 如果 BaseURL 以 /v1beta 结尾且请求路径也以 /v1beta 开头，去重
+	if strings.HasSuffix(baseURL, "/v1beta") && strings.HasPrefix(path, "v1beta/") {
+		path = strings.TrimPrefix(path, "v1beta/")
+	}
+	backendURL := baseURL + "/" + path
 	if r.URL.RawQuery != "" {
 		backendURL += "?" + r.URL.RawQuery
 	}
@@ -760,10 +767,17 @@ func (s *Server) serveGeminiRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 复制原始请求的 headers（除了客户端认证相关）
-	for k, v := range r.Header {
-		if k != "Authorization" && k != "X-Api-Key" && k != "Host" {
-			backendReq.Header[k] = v
+	// 只转发对 Gemini API 有意义的请求头（白名单策略）
+	forwardHeaders := []string{
+		"Content-Type",
+		"User-Agent",
+		"Accept",
+		"Accept-Encoding",
+		"Accept-Language",
+	}
+	for _, h := range forwardHeaders {
+		if v := r.Header.Values(h); len(v) > 0 {
+			backendReq.Header[h] = v
 		}
 	}
 	backendReq.Header.Set("Content-Type", "application/json")
@@ -1249,10 +1263,10 @@ func (s *Server) serveModelsList(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	type modelInfo struct {
-		ID        string `json:"id"`
-		Object    string `json:"object"`
-		Created   int64  `json:"created"`
-		OwnedBy   string `json:"owned_by"`
+		ID      string `json:"id"`
+		Object  string `json:"object"`
+		Created int64  `json:"created"`
+		OwnedBy string `json:"owned_by"`
 	}
 
 	type modelsResponse struct {
@@ -1367,10 +1381,10 @@ func (s *Server) serveModelsList(w http.ResponseWriter, r *http.Request) {
 			// 解析后端响应
 			var backendModels struct {
 				Data []struct {
-					ID       string `json:"id"`
-					Object   string `json:"object"`
-					Created  int64  `json:"created"`
-					OwnedBy  string `json:"owned_by"`
+					ID      string `json:"id"`
+					Object  string `json:"object"`
+					Created int64  `json:"created"`
+					OwnedBy string `json:"owned_by"`
 				} `json:"data"`
 			}
 

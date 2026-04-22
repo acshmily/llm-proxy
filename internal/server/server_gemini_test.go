@@ -118,6 +118,105 @@ func TestGeminiEndpoint_NonGeminiBackend(t *testing.T) {
 	}
 }
 
+func TestGeminiEndpoint_XApiKeyNotForwarded(t *testing.T) {
+	// 测试 X-Api-Key 认证方式也不应转发到后端
+	var receivedHeaders map[string]string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedHeaders = make(map[string]string)
+		for k, v := range r.Header {
+			receivedHeaders[k] = v[0]
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}`))
+	}))
+	defer backend.Close()
+
+	cfg := &config.Config{
+		Routes: []config.RouteConfig{
+			{APIKey: "sk-test", Backend: "gemini", BackendKey: "gemini-key", Timeout: 30000000000},
+		},
+		Backends: config.BackendsConfig{
+			Gemini: config.BackendConfig{BaseURL: backend.URL},
+		},
+	}
+	srv := New(cfg, router.New(cfg.Routes), logger.New(logger.TEXT, logger.INFO))
+
+	body := `{"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-pro:generateContent", nil)
+	req.Header.Set("X-Api-Key", "sk-test")
+	req.Header.Set("Content-Type", "application/json")
+	req.Body = io.NopCloser(strings.NewReader(body))
+
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected 200, got %d, body: %s", w.Code, w.Body.String())
+	}
+
+	// 认证相关 headers 不应出现在后端请求中
+	if _, ok := receivedHeaders["X-Api-Key"]; ok {
+		t.Error("X-Api-Key header should not be forwarded to backend")
+	}
+	if _, ok := receivedHeaders["Authorization"]; ok {
+		t.Error("Authorization header should not be forwarded to backend")
+	}
+	// Cookie 也不应转发
+	req2 := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-pro:generateContent", nil)
+	req2.Header.Set("X-Api-Key", "sk-test")
+	req2.Header.Set("Content-Type", "application/json")
+	req2.Header.Set("Cookie", "session=abc")
+	req2.Body = io.NopCloser(strings.NewReader(body))
+
+	w2 := httptest.NewRecorder()
+	srv.ServeHTTP(w2, req2)
+
+	// 白名单策略下 Cookie 不应被转发
+	if _, ok := receivedHeaders["Cookie"]; ok {
+		t.Error("Cookie header should not be forwarded to backend")
+	}
+}
+
+func TestGeminiEndpoint_BaseURLWithTrailingSlash(t *testing.T) {
+	// 测试 BaseURL 带尾部斜杠时路径拼接正确
+	var receivedPath string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"ok"}]}}]}`))
+	}))
+	defer backend.Close()
+
+	cfg := &config.Config{
+		Routes: []config.RouteConfig{
+			{APIKey: "sk-test", Backend: "gemini", BackendKey: "gemini-key", Timeout: 30000000000},
+		},
+		Backends: config.BackendsConfig{
+			Gemini: config.BackendConfig{BaseURL: backend.URL + "/v1beta/"}, // 注意尾部斜杠
+		},
+	}
+	srv := New(cfg, router.New(cfg.Routes), logger.New(logger.TEXT, logger.INFO))
+
+	body := `{"contents": [{"role": "user", "parts": [{"text": "hi"}]}]}`
+	req := httptest.NewRequest(http.MethodPost, "/v1beta/models/gemini-pro:generateContent", nil)
+	req.Header.Set("Authorization", "Bearer sk-test")
+	req.Header.Set("Content-Type", "application/json")
+	req.Body = io.NopCloser(strings.NewReader(body))
+
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected 200, got %d, body: %s", w.Code, w.Body.String())
+		return
+	}
+
+	expected := "/v1beta/models/gemini-pro:generateContent"
+	if receivedPath != expected {
+		t.Errorf("Expected backend path %q, got %q", expected, receivedPath)
+	}
+}
+
 func TestGeminiEndpoint_ForwardsStreamingResponse(t *testing.T) {
 	// Mock Gemini backend returning SSE
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
