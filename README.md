@@ -148,6 +148,7 @@ curl http://localhost:8080/health
 | `POST /v1/messages` | 聊天完成（Anthropic 协议，支持流式） |
 | `POST /v1/chat/completions` | 聊天完成（OpenAI 协议，支持流式） |
 | `POST /v1/completions` | 文本生成（OpenAI 旧版 Completions API，支持流式） |
+| `POST /v1beta/models/:model` | Gemini 原生端点（Gemini 协议直接透传，支持流式） |
 | `GET /v1/models` | 获取模型列表（聚合所有后端） |
 | `POST /v1/messages/count_tokens` | Token 计数 |
 
@@ -210,6 +211,36 @@ curl http://localhost:8080/v1/chat/completions \
 - 使用 OpenAI SDK 时调用 `/v1/chat/completions` 端点
 - 两种协议可以混合使用，路由配置无需修改
 - 模型名直接透传到后端，无需映射配置
+
+### Gemini 原生端点 (`/v1beta/models/:model`)
+
+Gemini 协议客户端可直接访问，代理透明转发到 Gemini 后端，不做协议转换：
+
+```bash
+curl http://localhost:8080/v1beta/models/gemini-pro:generateContent \
+  -H "Authorization: Bearer sk-client-1" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contents": [{"role": "user", "parts": [{"text": "Hello!"}]}]
+  }'
+```
+
+**流式请求：**
+
+```bash
+curl http://localhost:8080/v1beta/models/gemini-pro:streamGenerateContent?alt=sse \
+  -H "Authorization: Bearer sk-client-1" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "contents": [{"role": "user", "parts": [{"text": "Hello!"}]}]
+  }'
+```
+
+**特性：**
+- 完整 Gemini API 兼容：`generateContent`、`streamGenerateContent`、`countTokens` 等
+- 自动剥离客户端认证 headers（`Authorization` / `X-Api-Key`）
+- 仅路由到 Gemini 后端，其他后端返回 400
+- 请求路径和查询参数直接透传
 
 ### OpenClaw 接入
 
@@ -586,19 +617,63 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 
 ## 版本升级
 
-### v0.6.0 → v0.6.1（最新）
+### v0.7.2 → v0.7.3（最新）
 
 **无破坏性变更** - 配置完全向后兼容。
 
 **修复：**
-- `/v1/completions` 端点新增 `messages` 数组格式支持
-  - OpenClaw `openai-completions` 模式发送 `messages` 数组而非 `prompt`
-  - 同时兼容 `prompt` 和 `messages` 两种输入格式
+- Gemini 原生端点 Header 转发安全加固（黑名单 → 白名单）
+- BaseURL 尾部斜杠路径拼接修复
 
 **升级步骤：**
 1. 停止旧版本服务
-2. 部署 v0.6.1 二进制文件或 Docker 镜像
+2. 部署 v0.7.3 二进制文件或 Docker 镜像
 3. 重启服务（`config.yaml` 无需修改）
+
+### v0.7.1 → v0.7.2
+
+**无破坏性变更** - 配置完全向后兼容。
+
+**新增功能：**
+- `/v1beta/models/:model` Gemini 原生端点，支持直接透传 Gemini 协议请求
+
+**修复：**
+- 工具参数 `strict` 字段导致 OpenClaw 工具调用空响应
+
+**升级步骤：**
+1. 停止旧版本服务
+2. 部署 v0.7.2 二进制文件或 Docker 镜像
+3. 重启服务（`config.yaml` 无需修改）
+
+### v0.7.0 → v0.7.1
+
+**无破坏性变更** - 配置完全向后兼容。
+
+**修复：**
+- Gemini 工具定义兼容性：自动清理不支持的 JSON Schema 字段
+- 解决 OpenClaw 大量 MCP 工具定义触发 400 的问题
+
+**升级步骤：**
+1. 停止旧版本服务
+2. 部署 v0.7.1 二进制文件或 Docker 镜像
+3. 重启服务（`config.yaml` 无需修改）
+
+### v0.6.x → v0.7.0
+
+**无破坏性变更** - 配置完全向后兼容。
+
+**新增功能：**
+- **Gemini Function Calling 支持**
+  - OpenAI `tools`/`tool_calls`/`tool` 角色自动映射到 Gemini `functionDeclarations`/`functionCall`/`functionResponse`
+  - 支持多 tool_calls 同时发送（并行工具调用）
+  - 流式响应中 functionCall 自动转换为 OpenAI `tool_calls` delta 格式
+
+**升级步骤：**
+1. 停止旧版本服务
+2. 部署 v0.7.0 二进制文件或 Docker 镜像
+3. 重启服务（`config.yaml` 无需修改）
+
+### v0.6.1 → v0.6.2
 
 ### v0.5.3 → v0.6.0
 

@@ -337,8 +337,60 @@
 **无破坏性变更。**
 
 **修复内容：**
-- Gemini 原生端点 Header 转发安全加固
+- Gemini 原生端点 Header 转发安全加固（黑名单 → 白名单）
 - BaseURL 尾部斜杠路径拼接修复
+
+---
+
+### 从 v0.7.1 升级到 v0.7.2
+
+**无破坏性变更。**
+
+**新增功能：**
+- `/v1beta/models/:model` Gemini 原生端点
+  - 支持 `generateContent`、`streamGenerateContent`、`countTokens` 等完整 Gemini API
+  - 请求/响应直接透传，不做协议转换
+
+**修复：**
+- 工具参数 `strict` 字段导致 OpenClaw 工具调用空响应
+
+**升级步骤：**
+1. 停止旧版本服务
+2. 部署 v0.7.2 二进制文件或 Docker 镜像
+3. 重启服务（`config.yaml` 无需修改）
+
+---
+
+### 从 v0.7.0 升级到 v0.7.1
+
+**无破坏性变更。**
+
+**修复：**
+- Gemini 工具定义兼容性：自动清理不支持的 JSON Schema 字段
+  - 剥离 `additionalProperties`、`$ref`、`$schema`、`$id`、`default`、`deprecated`、`patternProperties`、`propertyNames`
+  - 解决 OpenClaw 大量 MCP 工具定义触发 400 的问题
+
+**升级步骤：**
+1. 停止旧版本服务
+2. 部署 v0.7.1 二进制文件或 Docker 镜像
+3. 重启服务（`config.yaml` 无需修改）
+
+---
+
+### 从 v0.6.x 升级到 v0.7.0
+
+**无破坏性变更。**
+
+**新增功能：**
+- **Gemini Function Calling 支持**
+  - OpenAI `tools`/`tool_calls`/`tool` 角色自动映射到 Gemini `functionDeclarations`/`functionCall`/`functionResponse`
+  - 支持多 tool_calls 同时发送（并行工具调用）
+  - 流式响应中 functionCall 自动转换为 OpenAI `tool_calls` delta 格式
+
+**升级步骤：**
+1. 停止旧版本服务
+2. 部署 v0.7.0 二进制文件或 Docker 镜像
+3. 重启服务（`config.yaml` 无需修改）
 
 ---
 
