@@ -5,6 +5,20 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.7.2] - 2026-04-22
+
+### 新增
+- **Gemini 原生端点**: `/v1beta/models/:model` 支持 Gemini 协议客户端直接访问
+  - 透传请求体到 Gemini 后端，无需协议转换
+  - 支持流式 SSE 响应直接转发
+  - 自动剥离客户端认证 headers（Authorization / X-Api-Key）
+  - 仅路由到 Gemini 后端，其他后端返回 400
+
+### 修复
+- **工具参数 `strict` 字段**: 自动从工具定义中剥离 `strict` 字段，防止 OpenClaw 工具调用返回空响应
+
+---
+
 ## [0.7.1] - 2026-04-22
 
 ### 修复
