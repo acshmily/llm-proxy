@@ -72,7 +72,8 @@ type BackendsConfig struct {
 }
 
 type BackendConfig struct {
-	BaseURL string `yaml:"base_url"`
+	BaseURL   string `yaml:"base_url"`
+	HttpProxy string `yaml:"http_proxy,omitempty"`
 }
 
 type RetryConfig struct {

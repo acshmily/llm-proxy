@@ -4,7 +4,42 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
+
+func TestBackendConfig_HttpProxy(t *testing.T) {
+	t.Run("parses http_proxy from yaml", func(t *testing.T) {
+		data := `
+backends:
+  gemini:
+    base_url: https://generativelanguage.googleapis.com/v1beta
+    http_proxy: http://127.0.0.1:18080
+`
+		var cfg Config
+		if err := yaml.Unmarshal([]byte(data), &cfg); err != nil {
+			t.Fatalf("Failed to unmarshal: %v", err)
+		}
+		if cfg.Backends.Gemini.HttpProxy != "http://127.0.0.1:18080" {
+			t.Errorf("Expected http_proxy 'http://127.0.0.1:18080', got %q", cfg.Backends.Gemini.HttpProxy)
+		}
+	})
+
+	t.Run("http_proxy is optional", func(t *testing.T) {
+		data := `
+backends:
+  gemini:
+    base_url: https://generativelanguage.googleapis.com/v1beta
+`
+		var cfg Config
+		if err := yaml.Unmarshal([]byte(data), &cfg); err != nil {
+			t.Fatalf("Failed to unmarshal: %v", err)
+		}
+		if cfg.Backends.Gemini.HttpProxy != "" {
+			t.Errorf("Expected empty http_proxy, got %q", cfg.Backends.Gemini.HttpProxy)
+		}
+	})
+}
 
 func TestConfig_Validate_ServerConfig(t *testing.T) {
 	t.Run("fails when server listen is empty", func(t *testing.T) {
