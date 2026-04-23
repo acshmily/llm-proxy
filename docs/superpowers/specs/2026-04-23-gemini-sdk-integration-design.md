@@ -173,6 +173,82 @@ google.golang.org/genai
 
 沿用现有 `debug_max_body` 配置，超出部分截断并标注总字节数。
 
+## OpenAI 参数完整映射（零遗漏）
+
+当前 `gemini.Convert()` 丢失了大量参数。SDK 适配层必须做到**参数零遗漏**。
+
+### `/v1/chat/completions` 参数流
+
+```
+客户端请求                    ParseRequest              UnifiedMessage            SDK 适配
+────────────                    ────────────              ──────────────            ──────
+model: "gpt-4"              ────────────────▶   Model: "gpt-4"            ──▶  model 参数
+messages[]                  ────────────────▶   Messages[]                ──▶  Contents[]
+  - role: "system"           (保留原始 role)     Messages[0].Role=system    ──▶  SystemInstruction
+  - role: "user"             (保留原始 role)     Messages[i].Role=user      ──▶  Content.Role="user"
+  - role: "assistant"        (保留原始 role)     Messages[i].Role=assistant ──▶  Content.Role="model"
+  - role: "tool"             (保留原始 role)     Messages[i].Role=tool      ──▶  Content.Parts[].FunctionResponse
+  - tool_calls[]             (保留 tool_calls)   Messages[i].ToolCalls[]    ──▶  Content.Parts[].FunctionCall
+  - tool_call_id             (保留 tool_call_id) Messages[i].ToolCallID     ──▶  查找 functionResponse name
+max_tokens                  ────────────────▶   MaxTokens: int            ──▶  GenerationConfig.MaxOutputTokens
+temperature                 ────────────────▶   Temperature: float64      ──▶  GenerationConfig.Temperature
+top_p                       ────────────────▶   TopP: float64             ──▶  GenerationConfig.TopP
+stop: ["\n", "END"]         ────────────────▶   StopSequences: []string   ──▶  GenerationConfig.StopSequences
+tools[]                     ────────────────▶   Tools[]                   ──▶  genai.Tool{FunctionDeclarations}
+tool_choice: "auto"         ────────────────▶   ToolChoice: interface{}   ──▶  ToolConfig.FunctionCallingConfig.Mode
+tool_choice: {"type":"function",
+  "function":{"name":"x"}}   ────────────────▶   ToolChoice: struct        ──▶  ToolConfig.FunctionCallingConfig.AllowedFunctionNames
+stream: true                ────────────────▶   Stream: bool              ──▶  决定调用 Generate vs GenerateStream
+```
+
+### `/v1/completions` 参数流
+
+```
+客户端请求                    serveCompletionsRequest     UnifiedMessage            SDK 适配
+────────────                    ──────────────────────      ──────────────            ──────
+prompt: "Hello"             ────────────────▶   Messages=[Role:user,   ──▶  Content.Parts[].Text
+                                               Content:"Hello"]
+messages[]                  ────────────────▶   Messages[]              ──▶  (同上 chat/completions)
+max_tokens                  ────────────────▶   MaxTokens: int          ──▶  GenerationConfig.MaxOutputTokens
+temperature                 ────────────────▶   Temperature: float64    ──▶  GenerationConfig.Temperature
+top_p                       ────────────────▶   TopP: float64           ──▶  GenerationConfig.TopP
+stop: ["\n"]                ────────────────▶   StopSequences: []string ──▶  GenerationConfig.StopSequences
+tools[]                     ────────────────▶   Tools[]                 ──▶  genai.Tool{FunctionDeclarations}
+tool_choice                 ────────────────▶   ToolChoice              ──▶  ToolConfig.FunctionCallingConfig
+stream                      ────────────────▶   Stream: bool            ──▶  决定调用 Generate vs GenerateStream
+```
+
+### 参数映射核对表
+
+| OpenAI 参数 | UnifiedMessage 字段 | 当前 gemini.Convert | SDK 适配层 | 影响 |
+|------------|-------------------|-------------------|-----------|-----|
+| model | Model | ✅ URL 使用 | ✅ | - |
+| messages | Messages | ✅ 转换 | ✅ 完整保留 | - |
+| max_tokens | MaxTokens | ❌ **丢失** | ✅ MaxOutputTokens | 限制输出长度 |
+| temperature | Temperature | ✅ | ✅ | - |
+| top_p | TopP | ❌ **丢失** | ✅ TopP | 采样控制 |
+| stop | StopSequences | ❌ **丢失** | ✅ StopSequences | 停止词 |
+| tools | Tools | ✅ | ✅ 完整保留 | - |
+| tool_choice | ToolChoice | ❌ **丢失** | ✅ ToolConfig | 工具调用策略 |
+| stream | Stream | ✅ URL 使用 | ✅ 方法选择 | - |
+| system role | Messages[0].Role | 映射为 user | ✅ SystemInstruction | 系统指令隔离 |
+
+### SDK 适配层签名
+
+```go
+// UnifiedMessageToSDK 将统一消息转换为 SDK 参数
+func UnifiedMessageToSDK(um *types.UnifiedMessage) (
+    model string,                          // 模型名
+    contents []*genai.Content,             // 对话内容
+    systemInstruction *genai.Content,      // 系统指令（可选）
+    config *genai.GenerateContentConfig,   // 生成配置
+    tools []*genai.Tool,                   // 工具定义
+    err error,
+)
+```
+
+---
+
 ## OpenAI 兼容响应链路
 
 SDK 调用完成后，需要将 Gemini SDK 响应正确转换为 OpenAI 格式返回。
