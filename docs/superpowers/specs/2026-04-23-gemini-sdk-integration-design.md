@@ -77,29 +77,29 @@ func (c *GeminiClient) GenerateStream(ctx, model string, contents []*genai.Conte
 | system/developer 角色 | 映射为 user | SystemInstruction（SDK 原生支持） |
 | Stream | 仅 URL 参数 | GenerateContentStream Iterator |
 
-**三种入口的完整转换链路**:
+**三种入口的完整转换链路（含响应回写）**:
 
 ```
 /v1/messages (Anthropic)
-  → anthropic.ParseRequest() → UnifiedMessage
-  → sdk_adapter.ToSDKContents() → genai.Content[] + Config
-  → client.Generate/GenerateStream() → genai.Response
-  → sdk_adapter.FromSDKResponse() → UnifiedResponse
-  → 返回 Anthropic 格式
+  请求: anthropic.ParseRequest() → UnifiedMessage
+  转换: sdk_adapter.ToSDK() → genai.Content[] + Config
+  调用: client.Generate/GenerateStream() → genai.Response
+  解析: sdk_adapter.FromSDK() → UnifiedResponse
+  返回: Anthropic 格式
 
-/v1/chat/completions (OpenAI Chat)
-  → openai.ParseRequest() → UnifiedMessage
-  → sdk_adapter.ToSDKContents() → genai.Content[] + Config
-  → client.Generate/GenerateStream() → genai.Response
-  → sdk_adapter.FromSDKResponse() → UnifiedResponse
-  → openai.BuildResponse() → OpenAI 格式
+/v1/chat/completions (OpenAI Chat API)
+  请求: openai.ParseRequest() → UnifiedMessage
+  转换: sdk_adapter.ToSDK() → genai.Content[] + Config
+  调用: client.Generate/GenerateStream() → genai.Response
+  解析: sdk_adapter.FromSDK() → UnifiedResponse
+  返回: openai.BuildResponse() → OpenAI ChatCompletion JSON (含 tool_calls, usage)
 
-/v1/completions (OpenAI 旧版)
-  → 解析 prompt/messages → UnifiedMessage
-  → sdk_adapter.ToSDKContents() → genai.Content[] + Config
-  → client.Generate/GenerateStream() → genai.Response
-  → sdk_adapter.FromSDKResponse() → UnifiedResponse
-  → buildCompletionsResponse() → Completions 格式
+/v1/completions (OpenAI Completions API)
+  请求: 解析 prompt/messages → UnifiedMessage
+  转换: sdk_adapter.ToSDK() → genai.Content[] + Config
+  调用: client.Generate/GenerateStream() → genai.Response
+  解析: sdk_adapter.FromSDK() → UnifiedResponse
+  返回: buildCompletionsResponse() → OpenAI Completions JSON
 ```
 
 **System Prompt 处理变更**:
@@ -173,12 +173,109 @@ google.golang.org/genai
 
 沿用现有 `debug_max_body` 配置，超出部分截断并标注总字节数。
 
-## 流式处理
+## OpenAI 兼容响应链路
 
-- **非流式**: SDK `GenerateContent` → 直接转换 → 返回 JSON
-- **流式**: SDK `GenerateContentStream` Iterator → 逐块转换为 SSE → 客户端
+SDK 调用完成后，需要将 Gemini SDK 响应正确转换为 OpenAI 格式返回。
 
-流式 SSE 转换逻辑复用现有 `convertGeminiSSEToOpenAI` 和 `convertGeminiSSEToCompletions`，但数据源从 SDK Iterator 而非 HTTP 响应体。
+### Chat Completions API (`/v1/chat/completions`)
+
+**请求链路**:
+```
+openai.ParseRequest()    → UnifiedMessage (已含 max_tokens, stop, top_p, tools)
+sdk_adapter.ToSDK()      → genai.Content[] + GenerateContentConfig + Tools
+client.Generate()        → genai.GenerateContentResponse
+sdk_adapter.FromSDK()    → UnifiedResponse (含 content, tool_calls, usage, finish_reason)
+openai.BuildResponse()   → OpenAI ChatCompletion JSON
+```
+
+**关键要求**: `openai.BuildResponse()` 需要补全，当前缺失:
+- `tool_calls` 字段回写（assistant 调用的函数）
+- `usage` 字段填充（prompt_tokens, completion_tokens, total_tokens）
+- 流式 SSE delta 格式中的 `tool_calls` 增量
+
+**当前 `openai/converter.go` 状态**:
+| 字段 | BuildResponse | 流式 delta |
+|------|--------------|-----------|
+| content text | ✅ 有 | ✅ 有 (via convertGeminiSSEToOpenAI) |
+| tool_calls | ❌ 缺失 | ❌ 缺失 |
+| usage | ❌ 缺失 | ❌ 缺失 |
+| finish_reason | ✅ 有 | ✅ 有 |
+
+**流式 OpenAI SSE 格式**:
+```
+data: {"id":"chat-1","choices":[{"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+data: {"id":"chat-1","choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}
+data: {"id":"chat-1","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_xxx","function":{"name":"search","arguments":"{\"q\":\"test\"}"}}]},"finish_reason":null}]}
+data: {"id":"chat-1","choices":[{"delta":{},"finish_reason":"stop"}]}
+data: [DONE]
+```
+
+### Completions API (`/v1/completions`)
+
+**请求链路**:
+```
+serveCompletionsRequest  → 解析 prompt/messages → UnifiedMessage
+sdk_adapter.ToSDK()      → genai.Content[] + Config
+client.Generate()        → genai.GenerateContentResponse
+sdk_adapter.FromSDK()    → UnifiedResponse
+buildCompletionsResponse() → {"id","object":"text_completion","choices":[{"text":"...","finish_reason":"stop"}]}
+```
+
+**当前 `buildCompletionsResponse` 状态**: 已实现基础文本转换
+
+**流式 Completions SSE 格式**:
+```
+data: {"choices":[{"text":"Hello","finish_reason":null}]}
+data: {"choices":[{"text":" world","finish_reason":null}]}
+data: {"choices":[{"text":"","finish_reason":"stop"}]}
+data: [DONE]
+```
+
+### 响应格式映射表 (Gemini SDK → OpenAI)
+
+| Gemini SDK 字段 | OpenAI Chat 字段 | Completions 字段 |
+|----------------|-----------------|-----------------|
+| candidates[0].content.parts[0].text | choices[0].message.content | choices[0].text |
+| candidates[0].content.parts[0].functionCall | choices[0].message.tool_calls | (不支持) |
+| candidates[0].finishReason | choices[0].finish_reason | choices[0].finish_reason |
+| usageMetadata.promptTokenCount | usage.prompt_tokens | usage.prompt_tokens |
+| usageMetadata.candidatesTokenCount | usage.completion_tokens | usage.completion_tokens |
+| candidates[0].safetyRatings | (不暴露) | (不暴露) |
+
+### SDK 流式转 OpenAI SSE 实现方案
+
+当前 `convertGeminiSSEToOpenAI` 从 HTTP 响应体解析 SSE，改为从 SDK Iterator 直接构建:
+
+```go
+// server.go 新增
+func (s *Server) handleOpenAIStreamFromSDK(w http.ResponseWriter, iter *genai.GenerateContentResponseIterator, backend string, connReused bool) {
+    w.Header().Set("Content-Type", "text/event-stream")
+    w.Header().Set("Cache-Control", "no-cache")
+    w.Header().Set("Connection", "keep-alive")
+    
+    for {
+        resp, err := iter.Next()
+        if err == io.EOF {
+            w.Write([]byte("data: [DONE]\n\n"))
+            break
+        }
+        
+        // 转换为 OpenAI delta SSE chunk
+        chunk := buildOpenAIStreamChunk(resp)
+        w.Write(chunk)
+        if f, ok := w.(http.Flusher); ok {
+            f.Flush()
+        }
+    }
+}
+```
+
+### 向后兼容承诺
+
+- `/v1/chat/completions` 返回的 JSON 结构必须与 OpenAI API 完全兼容
+- `/v1/completions` 返回的 JSON 结构必须与 OpenAI 旧版 API 完全兼容
+- 流式 SSE 格式必须与 OpenAI 格式一致
+- 客户端无需修改代码即可切换后端为 Gemini
 
 ## 错误处理
 
