@@ -5,6 +5,7 @@ import (
 	"iter"
 	"net/http"
 	"net/url"
+	"time"
 
 	"google.golang.org/genai"
 
@@ -33,8 +34,13 @@ func NewGeminiClient(apiKey string, proxy string, log *logger.Logger, debug bool
 			return nil, err
 		}
 		cfg.HTTPClient = &http.Client{
+			Timeout: 120 * time.Second,
 			Transport: &http.Transport{
-				Proxy: http.ProxyURL(proxyURL),
+				Proxy:               http.ProxyURL(proxyURL),
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 10,
+				IdleConnTimeout:     90 * time.Second,
+				TLSHandshakeTimeout: 10 * time.Second,
 			},
 		}
 	}

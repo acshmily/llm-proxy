@@ -1025,7 +1025,11 @@ func (s *Server) handleStreamFromSDK(w http.ResponseWriter, streamFn iter.Seq2[*
 
 	go func() {
 		for resp, err := range streamFn {
-			resultCh <- streamResult{resp: resp, err: err}
+			select {
+			case <-req.Context().Done():
+				return
+			case resultCh <- streamResult{resp: resp, err: err}:
+			}
 		}
 		close(resultCh)
 	}()
@@ -1044,6 +1048,10 @@ func (s *Server) handleStreamFromSDK(w http.ResponseWriter, streamFn iter.Seq2[*
 				return
 			}
 			if res.err != nil {
+				s.log.Error("Gemini SDK stream error (Anthropic entry)",
+					logger.LogField{Key: "model", Value: model},
+					logger.LogField{Key: "error", Value: res.err.Error()},
+				)
 				return
 			}
 			if len(res.resp.Candidates) > 0 && res.resp.Candidates[0].Content != nil {
@@ -1084,7 +1092,11 @@ func (s *Server) handleCompletionsStreamFromSDK(w http.ResponseWriter, streamFn 
 
 	go func() {
 		for resp, err := range streamFn {
-			resultCh <- streamResult{resp: resp, err: err}
+			select {
+			case <-req.Context().Done():
+				return
+			case resultCh <- streamResult{resp: resp, err: err}:
+			}
 		}
 		close(resultCh)
 	}()
@@ -1118,6 +1130,11 @@ func (s *Server) handleCompletionsStreamFromSDK(w http.ResponseWriter, streamFn 
 				return
 			}
 			if res.err != nil {
+				s.log.Error("Gemini SDK stream error (Completions)",
+					logger.LogField{Key: "model", Value: model},
+					logger.LogField{Key: "error", Value: res.err.Error()},
+				)
+				w.Write([]byte("data: [DONE]\n\n"))
 				return
 			}
 			if len(res.resp.Candidates) > 0 && res.resp.Candidates[0].Content != nil {
@@ -1178,6 +1195,12 @@ func (s *Server) serveGeminiWithSDK(w http.ResponseWriter, r *http.Request, rout
 		if err != nil {
 			s.writeError(w, http.StatusBadGateway, "SDK call failed")
 			return
+		}
+
+		if s.debugRequests {
+			if restData, err := protocolgemini.SDKResponseToREST(resp); err == nil {
+				s.logResponseBody("/v1beta/models (sdk)", restData, 200)
+			}
 		}
 
 		latency := time.Since(start).Milliseconds()
@@ -1449,7 +1472,11 @@ func (s *Server) handleOpenAIStreamFromSDK(w http.ResponseWriter, streamFn iter.
 
 	go func() {
 		for resp, err := range streamFn {
-			resultCh <- streamResult{resp: resp, err: err}
+			select {
+			case <-req.Context().Done():
+				return
+			case resultCh <- streamResult{resp: resp, err: err}:
+			}
 		}
 		close(resultCh)
 	}()
@@ -1474,6 +1501,11 @@ func (s *Server) handleOpenAIStreamFromSDK(w http.ResponseWriter, streamFn iter.
 				return
 			}
 			if res.err != nil {
+				s.log.Error("Gemini SDK stream error",
+					logger.LogField{Key: "model", Value: model},
+					logger.LogField{Key: "error", Value: res.err.Error()},
+				)
+				w.Write([]byte("data: [DONE]\n\n"))
 				return
 			}
 			chunk := buildOpenAIStreamChunkFromSDK(res.resp)
