@@ -91,3 +91,62 @@ func TestBuildResponse_EmptyContent(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, "chat.completion", resp["object"])
 }
+
+func TestBuildResponse_WithToolCalls(t *testing.T) {
+	unified := &types.UnifiedResponse{
+		ID:      "gemini-sdk-1",
+		Model:   "gemini-2.0-flash",
+		Content: []types.ContentBlock{{Type: "text", Text: "Let me check..."}},
+		Role:    "assistant",
+		ToolCalls: []types.ToolCall{{
+			ID:   "call_weather_0",
+			Type: "function",
+			Function: types.FunctionCall{
+				Name:      "get_weather",
+				Arguments: `{"location": "Tokyo"}`,
+			},
+		}},
+		Usage: types.Usage{
+			InputTokens:  100,
+			OutputTokens: 50,
+		},
+	}
+
+	data, err := BuildResponse(unified)
+	if err != nil {
+		t.Fatalf("BuildResponse failed: %v", err)
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		t.Fatalf("JSON unmarshal failed: %v", err)
+	}
+
+	choices := resp["choices"].([]interface{})
+	if len(choices) != 1 {
+		t.Fatalf("Expected 1 choice, got %d", len(choices))
+	}
+	choice := choices[0].(map[string]interface{})
+	message := choice["message"].(map[string]interface{})
+
+	toolCalls, ok := message["tool_calls"].([]interface{})
+	if !ok || len(toolCalls) != 1 {
+		t.Fatalf("Expected 1 tool_call, got %v", message["tool_calls"])
+	}
+	tc := toolCalls[0].(map[string]interface{})
+	if tc["id"] != "call_weather_0" {
+		t.Errorf("Expected tool_call id 'call_weather_0', got %q", tc["id"])
+	}
+	fn := tc["function"].(map[string]interface{})
+	if fn["name"] != "get_weather" {
+		t.Errorf("Expected function 'get_weather', got %q", fn["name"])
+	}
+
+	usage := resp["usage"].(map[string]interface{})
+	if int(usage["prompt_tokens"].(float64)) != 100 {
+		t.Errorf("Expected 100 prompt tokens, got %v", usage["prompt_tokens"])
+	}
+	if int(usage["completion_tokens"].(float64)) != 50 {
+		t.Errorf("Expected 50 completion tokens, got %v", usage["completion_tokens"])
+	}
+}

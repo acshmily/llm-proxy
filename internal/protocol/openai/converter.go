@@ -150,17 +150,34 @@ func BuildResponse(unified *types.UnifiedResponse) ([]byte, error) {
 		finishReason = "stop"
 	}
 
+	message := ChatMessage{
+		Role:    "assistant",
+		Content: content,
+	}
+
+	// 补全 tool_calls
+	if len(unified.ToolCalls) > 0 {
+		message.ToolCalls = make([]ToolCallRef, len(unified.ToolCalls))
+		for i, tc := range unified.ToolCalls {
+			message.ToolCalls[i] = ToolCallRef{
+				ID:   tc.ID,
+				Type: tc.Type,
+				Function: ToolCallFunctionRef{
+					Name:      tc.Function.Name,
+					Arguments: tc.Function.Arguments,
+				},
+			}
+		}
+	}
+
 	resp := ChatCompletionResponse{
 		ID:      unified.ID,
 		Object:  "chat.completion",
 		Created: time.Now().Unix(),
 		Model:   unified.Model,
 		Choices: []Choice{{
-			Index: 0,
-			Message: ChatMessage{
-				Role:    "assistant",
-				Content: content,
-			},
+			Index:        0,
+			Message:      message,
 			FinishReason: finishReason,
 		}},
 		Usage: Usage{
