@@ -5,7 +5,7 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [0.8.1] - 2026-04-23
+## [0.8.2] - 2026-04-23
 
 ### 修复
 - **Content 数组格式兼容**: `/v1/chat/completions` 端点兼容 OpenAI 标准 content 数组格式
