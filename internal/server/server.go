@@ -724,11 +724,16 @@ func (s *Server) handleNonStream(w http.ResponseWriter, resp *http.Response, bac
 
 	// 记录日志
 	requests, reused, created := s.poolStats.GetStats()
+	var output string
+	if len(unified.Content) > 0 {
+		output = unified.Content[0].Text
+	}
 	s.log.Info("Request completed",
 		logger.LogField{Key: "latency_ms", Value: latency},
 		logger.LogField{Key: "status_code", Value: resp.StatusCode},
 		logger.LogField{Key: "input_tokens", Value: unified.Usage.InputTokens},
 		logger.LogField{Key: "output_tokens", Value: unified.Usage.OutputTokens},
+		logger.LogField{Key: "output", Value: output},
 		logger.LogField{Key: "backend", Value: backend},
 		logger.LogField{Key: "conn_reused", Value: connReused},
 		logger.LogField{Key: "pool_requests", Value: requests},
@@ -779,9 +784,14 @@ func (s *Server) handleOpenAINonStream(w http.ResponseWriter, resp *http.Respons
 	}
 
 	// 记录日志
+	var output string
+	if len(unified.Content) > 0 {
+		output = unified.Content[0].Text
+	}
 	s.log.Info("OpenAI request completed",
 		logger.LogField{Key: "latency_ms", Value: latency},
 		logger.LogField{Key: "status_code", Value: resp.StatusCode},
+		logger.LogField{Key: "output", Value: output},
 		logger.LogField{Key: "backend", Value: backend},
 		logger.LogField{Key: "conn_reused", Value: connReused},
 	)
@@ -834,11 +844,16 @@ func (s *Server) serveOpenAIWithSDK(w http.ResponseWriter, r *http.Request, rout
 		}
 
 		latency := time.Since(start).Milliseconds()
+		var output string
+		if len(unifiedResp.Content) > 0 {
+			output = unifiedResp.Content[0].Text
+		}
 		s.log.Info("Gemini SDK request completed",
 			logger.LogField{Key: "model", Value: model},
 			logger.LogField{Key: "latency_ms", Value: latency},
 			logger.LogField{Key: "input_tokens", Value: unifiedResp.Usage.InputTokens},
 			logger.LogField{Key: "output_tokens", Value: unifiedResp.Usage.OutputTokens},
+			logger.LogField{Key: "output", Value: output},
 		)
 
 		respBody, err := openai.BuildResponse(unifiedResp)
@@ -896,11 +911,16 @@ func (s *Server) serveRequestWithSDK(w http.ResponseWriter, r *http.Request, rou
 		}
 
 		latency := time.Since(start).Milliseconds()
+		var output string
+		if len(unifiedResp.Content) > 0 {
+			output = unifiedResp.Content[0].Text
+		}
 		s.log.Info("Gemini SDK request completed",
 			logger.LogField{Key: "model", Value: model},
 			logger.LogField{Key: "latency_ms", Value: latency},
 			logger.LogField{Key: "input_tokens", Value: unifiedResp.Usage.InputTokens},
 			logger.LogField{Key: "output_tokens", Value: unifiedResp.Usage.OutputTokens},
+			logger.LogField{Key: "output", Value: output},
 		)
 
 		w.Header().Set("Content-Type", "application/json")
@@ -947,18 +967,19 @@ func (s *Server) serveCompletionsWithSDK(w http.ResponseWriter, r *http.Request,
 		}
 
 		latency := time.Since(start).Milliseconds()
+		var text string
+		if len(unifiedResp.Content) > 0 {
+			text = unifiedResp.Content[0].Text
+		}
 		s.log.Info("Gemini SDK request completed (Completions)",
 			logger.LogField{Key: "model", Value: model},
 			logger.LogField{Key: "latency_ms", Value: latency},
 			logger.LogField{Key: "input_tokens", Value: unifiedResp.Usage.InputTokens},
 			logger.LogField{Key: "output_tokens", Value: unifiedResp.Usage.OutputTokens},
+			logger.LogField{Key: "output", Value: text},
 		)
 
 		// 构建 Completions 格式响应
-		var text string
-		if len(unifiedResp.Content) > 0 {
-			text = unifiedResp.Content[0].Text
-		}
 		completionResp := map[string]interface{}{
 			"id":      unifiedResp.ID,
 			"object":  "text_completion",
@@ -1723,9 +1744,14 @@ func (s *Server) handleCompletionsNonStream(w http.ResponseWriter, resp *http.Re
 		return
 	}
 
+	var output string
+	if len(unified.Content) > 0 {
+		output = unified.Content[0].Text
+	}
 	s.log.Info("Completions request completed",
 		logger.LogField{Key: "latency_ms", Value: latency},
 		logger.LogField{Key: "status_code", Value: resp.StatusCode},
+		logger.LogField{Key: "output", Value: output},
 		logger.LogField{Key: "backend", Value: backend},
 		logger.LogField{Key: "conn_reused", Value: connReused},
 	)
