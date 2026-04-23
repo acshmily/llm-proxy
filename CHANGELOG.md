@@ -8,6 +8,7 @@
 ## [0.8.1] - 2026-04-23
 
 ### 修复
+- **日志补充**: 非流式请求完成日志新增 `output` 字段，记录模型返回的实际文本内容
 - **流式 clientDisconnected 检测**: `handleCompletionsStreamFromSDK` 重构为 goroutine+channel 模式，确保客户端断开时正确终止流
 - **流式 finish_reason**: Completions 流式响应在 `[DONE]` 前发送带 `finish_reason: "stop"` 的结束 chunk
 - **Gemini 原生端点解析**: `parseNativeGeminiRequest` 新增 `systemInstruction`、`tools`、`toolConfig` 解析
