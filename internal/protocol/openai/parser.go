@@ -2,6 +2,7 @@ package openai
 
 import (
 	"encoding/json"
+
 	"github.com/claude-projetc/llm-proxy/pkg/types"
 )
 
@@ -34,11 +35,11 @@ func ParseRequest(data []byte) (*types.UnifiedMessage, error) {
 		}
 	}
 
-	// 转换消息
+	// 转换消息，提取 content 为纯字符串
 	for i, msg := range req.Messages {
 		mr := types.MessageRole{
 			Role:       msg.Role,
-			Content:    msg.Content,
+			Content:    extractContent(msg.Content),
 			ToolCallID: msg.ToolCallID,
 		}
 
@@ -66,4 +67,35 @@ func ParseRequest(data []byte) (*types.UnifiedMessage, error) {
 	}
 
 	return unified, nil
+}
+
+// extractContent 从 JSON 字符串或内容数组中提取纯文本
+func extractContent(content json.RawMessage) string {
+	if len(content) == 0 {
+		return ""
+	}
+	// 先尝试字符串格式
+	var str string
+	if err := json.Unmarshal(content, &str); err == nil {
+		return str
+	}
+	// 再尝试数组格式
+	var blocks []struct {
+		Type    string `json:"type"`
+		Text    string `json:"text"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(content, &blocks); err == nil {
+		var result string
+		for _, b := range blocks {
+			if b.Type == "text" && b.Text != "" {
+				result += b.Text
+			}
+			if b.Type == "tool_result" && b.Content != "" {
+				result += b.Content
+			}
+		}
+		return result
+	}
+	return ""
 }

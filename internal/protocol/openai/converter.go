@@ -46,10 +46,10 @@ type OpenAIRequest struct {
 
 // ChatMessage OpenAI 聊天消息
 type ChatMessage struct {
-	Role       string        `json:"role"`
-	Content    string        `json:"content"`
-	ToolCalls  []ToolCallRef `json:"tool_calls,omitempty"`
-	ToolCallID string        `json:"tool_call_id,omitempty"`
+	Role       string            `json:"role"`
+	Content    json.RawMessage   `json:"content"`
+	ToolCalls  []ToolCallRef     `json:"tool_calls,omitempty"`
+	ToolCallID string            `json:"tool_call_id,omitempty"`
 }
 
 // Convert 统一格式 -> OpenAI 格式
@@ -65,9 +65,10 @@ func Convert(um *types.UnifiedMessage, modelOverride string) ([]byte, error) {
 	}
 
 	for i, msg := range um.Messages {
+		contentBytes, _ := json.Marshal(msg.Content)
 		req.Messages[i] = ChatMessage{
 			Role:    msg.Role,
-			Content: msg.Content,
+			Content: contentBytes,
 		}
 	}
 
@@ -85,7 +86,7 @@ func ParseResponse(data []byte) (*types.UnifiedResponse, error) {
 	var content string
 	var finishReason string
 	if len(resp.Choices) > 0 {
-		content = resp.Choices[0].Message.Content
+		content = extractContent(resp.Choices[0].Message.Content)
 		finishReason = resp.Choices[0].FinishReason
 	}
 
@@ -150,9 +151,10 @@ func BuildResponse(unified *types.UnifiedResponse) ([]byte, error) {
 		finishReason = "stop"
 	}
 
+	contentBytes, _ := json.Marshal(content)
 	message := ChatMessage{
 		Role:    "assistant",
-		Content: content,
+		Content: contentBytes,
 	}
 
 	// 补全 tool_calls

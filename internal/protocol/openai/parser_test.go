@@ -142,3 +142,59 @@ func TestParseRequest_WithAllParameters(t *testing.T) {
 	// 注意：PresencePenalty, FrequencyPenalty, User 字段当前未映射到 UnifiedMessage
 	// 这些字段可以在后续扩展中添加
 }
+
+func TestParseRequest_ContentAsArrayFormat(t *testing.T) {
+	// 客户端发送 OpenAI 标准 content 数组格式
+	body := []byte(`{
+		"model": "gpt-4",
+		"messages": [
+			{"role": "user", "content": [{"type": "text", "text": "hello"}]},
+			{"role": "assistant", "content": [{"type": "text", "text": "Hi there"}]},
+			{"role": "user", "content": [{"type": "text", "text": "How are you?"}]}
+		]
+	}`)
+
+	unified, err := ParseRequest(body)
+	assert.NoError(t, err)
+	assert.Equal(t, "hello", unified.Messages[0].Content)
+	assert.Equal(t, "Hi there", unified.Messages[1].Content)
+	assert.Equal(t, "How are you?", unified.Messages[2].Content)
+}
+
+func TestParseRequest_ContentAsMixedArray(t *testing.T) {
+	// 多部分消息，只提取 text 类型
+	body := []byte(`{
+		"model": "gpt-4",
+		"messages": [
+			{"role": "user", "content": [
+				{"type": "text", "text": "Part 1. "},
+				{"type": "image_url", "image_url": {"url": "http://example.com"}},
+				{"type": "text", "text": "Part 2."}
+			]}
+		]
+	}`)
+
+	unified, err := ParseRequest(body)
+	assert.NoError(t, err)
+	assert.Equal(t, "Part 1. Part 2.", unified.Messages[0].Content)
+}
+
+func TestParseRequest_NullContent(t *testing.T) {
+	// assistant 消息可能带 null content + tool_calls
+	body := []byte(`{
+		"model": "gpt-4",
+		"messages": [
+			{"role": "user", "content": "Hello"},
+			{"role": "assistant", "content": null, "tool_calls": [{
+				"id": "call_abc",
+				"type": "function",
+				"function": {"name": "get_weather", "arguments": "{}"}
+			}]}
+		]
+	}`)
+
+	unified, err := ParseRequest(body)
+	assert.NoError(t, err)
+	assert.Equal(t, "", unified.Messages[1].Content)
+	assert.Len(t, unified.Messages[1].ToolCalls, 1)
+}

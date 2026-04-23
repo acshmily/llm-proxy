@@ -8,6 +8,9 @@
 ## [0.8.1] - 2026-04-23
 
 ### 修复
+- **Content 数组格式兼容**: `/v1/chat/completions` 端点兼容 OpenAI 标准 content 数组格式
+  - 客户端发送 `{"content": [{"type": "text", "text": "hello"}]}` 时自动提取为纯字符串
+  - 避免因后端不支持 content 数组格式导致 400 错误
 - **日志补充**: 非流式请求完成日志新增 `output` 字段，记录模型返回的实际文本内容
 - **流式 clientDisconnected 检测**: `handleCompletionsStreamFromSDK` 重构为 goroutine+channel 模式，确保客户端断开时正确终止流
 - **流式 finish_reason**: Completions 流式响应在 `[DONE]` 前发送带 `finish_reason: "stop"` 的结束 chunk
