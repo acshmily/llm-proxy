@@ -803,7 +803,9 @@ func (s *Server) serveOpenAIWithSDK(w http.ResponseWriter, r *http.Request, rout
 	if sysInst != nil {
 		config.SystemInstruction = sysInst
 	}
-	_ = tools // tools 已经在 config 中通过 UnifiedMessageToSDK 设置
+	if len(tools) > 0 {
+		config.Tools = tools
+	}
 
 	s.log.Info("Gemini SDK request started",
 		logger.LogField{Key: "model", Value: model},
@@ -864,7 +866,9 @@ func (s *Server) serveRequestWithSDK(w http.ResponseWriter, r *http.Request, rou
 	if sysInst != nil {
 		config.SystemInstruction = sysInst
 	}
-	_ = tools
+	if len(tools) > 0 {
+		config.Tools = tools
+	}
 
 	s.log.Info("Gemini SDK request started (Anthropic entry)",
 		logger.LogField{Key: "model", Value: model},
@@ -919,7 +923,9 @@ func (s *Server) serveCompletionsWithSDK(w http.ResponseWriter, r *http.Request,
 	if sysInst != nil {
 		config.SystemInstruction = sysInst
 	}
-	_ = tools
+	if len(tools) > 0 {
+		config.Tools = tools
+	}
 
 	s.log.Info("Gemini SDK request started (Completions)",
 		logger.LogField{Key: "model", Value: model},
@@ -972,7 +978,10 @@ func (s *Server) serveCompletionsWithSDK(w http.ResponseWriter, r *http.Request,
 			}
 		}
 
-		respBody, _ := json.Marshal(completionResp)
+		respBody, err := json.Marshal(completionResp)
+		if err != nil {
+			return err
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write(respBody)
@@ -987,53 +996,57 @@ func (s *Server) handleStreamFromSDK(w http.ResponseWriter, streamFn iter.Seq2[*
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	clientDisconnected := make(chan struct{})
+	type streamResult struct {
+		resp *genai.GenerateContentResponse
+		err  error
+	}
+	resultCh := make(chan streamResult, 1)
+
 	go func() {
-		select {
-		case <-req.Context().Done():
-			close(clientDisconnected)
+		for resp, err := range streamFn {
+			resultCh <- streamResult{resp: resp, err: err}
 		}
+		close(resultCh)
 	}()
 
-	for response, err := range streamFn {
+	for {
 		select {
-		case <-clientDisconnected:
+		case <-req.Context().Done():
 			return
-		default:
-		}
-
-		if err != nil {
-			return
-		}
-
-		// 转换为 Anthropic SSE 格式
-		if len(response.Candidates) > 0 && response.Candidates[0].Content != nil {
-			for _, part := range response.Candidates[0].Content.Parts {
-				if part.Text != "" {
-					chunk := map[string]interface{}{
-						"type": "content_block_delta",
-						"delta": map[string]interface{}{
-							"type": "text_delta",
-							"text": part.Text,
-						},
-					}
-					data, _ := json.Marshal(chunk)
-					w.Write([]byte("event: content_block_delta\ndata: "))
-					w.Write(data)
-					w.Write([]byte("\n\n"))
-					if f, ok := w.(http.Flusher); ok {
-						f.Flush()
+		case res, ok := <-resultCh:
+			if !ok {
+				latency := time.Since(start).Milliseconds()
+				s.log.Info("Gemini SDK stream completed (Anthropic entry)",
+					logger.LogField{Key: "model", Value: model},
+					logger.LogField{Key: "latency_ms", Value: latency},
+				)
+				return
+			}
+			if res.err != nil {
+				return
+			}
+			if len(res.resp.Candidates) > 0 && res.resp.Candidates[0].Content != nil {
+				for _, part := range res.resp.Candidates[0].Content.Parts {
+					if part.Text != "" {
+						chunk := map[string]interface{}{
+							"type": "content_block_delta",
+							"delta": map[string]interface{}{
+								"type": "text_delta",
+								"text": part.Text,
+							},
+						}
+						data, _ := json.Marshal(chunk)
+						w.Write([]byte("event: content_block_delta\ndata: "))
+						w.Write(data)
+						w.Write([]byte("\n\n"))
+						if flusher, ok := w.(http.Flusher); ok {
+							flusher.Flush()
+						}
 					}
 				}
 			}
 		}
 	}
-
-	latency := time.Since(start).Milliseconds()
-	s.log.Info("Gemini SDK stream completed (Anthropic entry)",
-		logger.LogField{Key: "model", Value: model},
-		logger.LogField{Key: "latency_ms", Value: latency},
-	)
 }
 
 // handleCompletionsStreamFromSDK 处理 Completions 流式响应
@@ -1042,56 +1055,70 @@ func (s *Server) handleCompletionsStreamFromSDK(w http.ResponseWriter, streamFn 
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	clientDisconnected := make(chan struct{})
+	type streamResult struct {
+		resp *genai.GenerateContentResponse
+		err  error
+	}
+	resultCh := make(chan streamResult, 1)
+
 	go func() {
-		select {
-		case <-req.Context().Done():
-			close(clientDisconnected)
+		for resp, err := range streamFn {
+			resultCh <- streamResult{resp: resp, err: err}
 		}
+		close(resultCh)
 	}()
 
-	for response, err := range streamFn {
+	for {
 		select {
-		case <-clientDisconnected:
+		case <-req.Context().Done():
 			w.Write([]byte("data: [DONE]\n\n"))
 			return
-		default:
-		}
-
-		if err != nil {
-			return
-		}
-
-		if len(response.Candidates) > 0 && response.Candidates[0].Content != nil {
-			for _, part := range response.Candidates[0].Content.Parts {
-				if part.Text != "" {
-					chunk := map[string]interface{}{
-						"choices": []map[string]interface{}{{
-							"text":          part.Text,
-							"finish_reason": nil,
-						}},
-					}
-					data, _ := json.Marshal(chunk)
-					w.Write(append([]byte("data: "), data...))
-					w.Write([]byte("\n\n"))
-					if f, ok := w.(http.Flusher); ok {
-						f.Flush()
+		case res, ok := <-resultCh:
+			if !ok {
+				// stream 结束，发送 finish_reason
+				chunk := map[string]interface{}{
+					"choices": []map[string]interface{}{{
+						"text":          "",
+						"finish_reason": "stop",
+					}},
+				}
+				data, _ := json.Marshal(chunk)
+				w.Write(append([]byte("data: "), data...))
+				w.Write([]byte("\n\n"))
+				w.Write([]byte("data: [DONE]\n\n"))
+				if fl, ok3 := w.(http.Flusher); ok3 {
+					fl.Flush()
+				}
+				latency := time.Since(start).Milliseconds()
+				s.log.Info("Gemini SDK stream completed (Completions)",
+					logger.LogField{Key: "model", Value: model},
+					logger.LogField{Key: "latency_ms", Value: latency},
+				)
+				return
+			}
+			if res.err != nil {
+				return
+			}
+			if len(res.resp.Candidates) > 0 && res.resp.Candidates[0].Content != nil {
+				for _, part := range res.resp.Candidates[0].Content.Parts {
+					if part.Text != "" {
+						chunk := map[string]interface{}{
+							"choices": []map[string]interface{}{{
+								"text":          part.Text,
+								"finish_reason": nil,
+							}},
+						}
+						data, _ := json.Marshal(chunk)
+						w.Write(append([]byte("data: "), data...))
+						w.Write([]byte("\n\n"))
+						if fl, ok4 := w.(http.Flusher); ok4 {
+							fl.Flush()
+						}
 					}
 				}
 			}
 		}
 	}
-
-	w.Write([]byte("data: [DONE]\n\n"))
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	}
-
-	latency := time.Since(start).Milliseconds()
-	s.log.Info("Gemini SDK stream completed (Completions)",
-		logger.LogField{Key: "model", Value: model},
-		logger.LogField{Key: "latency_ms", Value: latency},
-	)
 }
 
 // serveGeminiWithSDK 使用 SDK 处理 Gemini 原生端点
@@ -1156,6 +1183,20 @@ func parseNativeGeminiRequest(req map[string]interface{}) ([]*genai.Content, *ge
 	var contents []*genai.Content
 	config := &genai.GenerateContentConfig{}
 
+	// 解析 systemInstruction
+	if sysInst, ok := req["systemInstruction"].(map[string]interface{}); ok {
+		config.SystemInstruction = &genai.Content{Role: "system"}
+		if parts, ok := sysInst["parts"].([]interface{}); ok {
+			for _, p := range parts {
+				if pm, ok := p.(map[string]interface{}); ok {
+					if text, ok := pm["text"].(string); ok {
+						config.SystemInstruction.Parts = append(config.SystemInstruction.Parts, &genai.Part{Text: text})
+					}
+				}
+			}
+		}
+	}
+
 	// 解析 contents
 	if rawContents, ok := req["contents"].([]interface{}); ok {
 		for _, c := range rawContents {
@@ -1167,14 +1208,92 @@ func parseNativeGeminiRequest(req map[string]interface{}) ([]*genai.Content, *ge
 				if parts, ok := cm["parts"].([]interface{}); ok {
 					for _, p := range parts {
 						if pm, ok := p.(map[string]interface{}); ok {
+							part := &genai.Part{}
 							if text, ok := pm["text"].(string); ok {
-								content.Parts = append(content.Parts, &genai.Part{Text: text})
+								part.Text = text
+							}
+							if fc, ok := pm["functionCall"].(map[string]interface{}); ok {
+								part.FunctionCall = &genai.FunctionCall{}
+								if name, ok := fc["name"].(string); ok {
+									part.FunctionCall.Name = name
+								}
+								if args, ok := fc["args"].(map[string]interface{}); ok {
+									part.FunctionCall.Args = args
+								}
+							}
+							if fr, ok := pm["functionResponse"].(map[string]interface{}); ok {
+								part.FunctionResponse = &genai.FunctionResponse{}
+								if name, ok := fr["name"].(string); ok {
+									part.FunctionResponse.Name = name
+								}
+								if resp, ok := fr["response"].(map[string]interface{}); ok {
+									part.FunctionResponse.Response = resp
+								}
+							}
+							if part.Text != "" || part.FunctionCall != nil || part.FunctionResponse != nil {
+								content.Parts = append(content.Parts, part)
 							}
 						}
 					}
 				}
 				if len(content.Parts) > 0 {
 					contents = append(contents, content)
+				}
+			}
+		}
+	}
+
+	// 解析 tools
+	if rawTools, ok := req["tools"].([]interface{}); ok {
+		for _, t := range rawTools {
+			if tm, ok := t.(map[string]interface{}); ok {
+				// Gemini 原生格式: {"functionDeclarations": [...]}
+				if decls, ok := tm["functionDeclarations"].([]interface{}); ok && len(decls) > 0 {
+					sdkTool := &genai.Tool{}
+					for _, d := range decls {
+						if dm, ok := d.(map[string]interface{}); ok {
+							decl := &genai.FunctionDeclaration{}
+							if name, ok := dm["name"].(string); ok {
+								decl.Name = name
+							}
+							if desc, ok := dm["description"].(string); ok {
+								decl.Description = desc
+							}
+							if params, ok := dm["parameters"].(map[string]interface{}); ok {
+								// 将 map 转换为 genai.Schema
+								decl.Parameters = buildSchemaFromMap(params)
+							}
+							sdkTool.FunctionDeclarations = append(sdkTool.FunctionDeclarations, decl)
+						}
+					}
+					config.Tools = append(config.Tools, sdkTool)
+				}
+			}
+		}
+	}
+
+	// 解析 toolConfig
+	if toolCfg, ok := req["toolConfig"].(map[string]interface{}); ok {
+		if fcc, ok := toolCfg["functionCallingConfig"].(map[string]interface{}); ok {
+			config.ToolConfig = &genai.ToolConfig{
+				FunctionCallingConfig: &genai.FunctionCallingConfig{},
+			}
+			if mode, ok := fcc["mode"].(string); ok {
+				switch mode {
+				case "AUTO":
+					config.ToolConfig.FunctionCallingConfig.Mode = genai.FunctionCallingConfigModeAuto
+				case "ANY":
+					config.ToolConfig.FunctionCallingConfig.Mode = genai.FunctionCallingConfigModeAny
+				case "NONE":
+					config.ToolConfig.FunctionCallingConfig.Mode = genai.FunctionCallingConfigModeNone
+				}
+			}
+			if allowed, ok := fcc["allowedFunctionNames"].([]interface{}); ok {
+				for _, a := range allowed {
+					if s, ok := a.(string); ok {
+						config.ToolConfig.FunctionCallingConfig.AllowedFunctionNames = append(
+							config.ToolConfig.FunctionCallingConfig.AllowedFunctionNames, s)
+					}
 				}
 			}
 		}
@@ -1203,6 +1322,65 @@ func parseNativeGeminiRequest(req map[string]interface{}) ([]*genai.Content, *ge
 	}
 
 	return contents, config
+}
+
+// buildSchemaFromMap 将 JSON schema map 转换为 genai.Schema
+func buildSchemaFromMap(m map[string]interface{}) *genai.Schema {
+	schema := &genai.Schema{}
+	if typ, ok := m["type"].(string); ok {
+		schema.Type = schemaTypeFromString(typ)
+	}
+	if desc, ok := m["description"].(string); ok {
+		schema.Description = desc
+	}
+	if nullable, ok := m["nullable"].(bool); ok {
+		schema.Nullable = &nullable
+	}
+	if items, ok := m["items"].(map[string]interface{}); ok {
+		schema.Items = buildSchemaFromMap(items)
+	}
+	if props, ok := m["properties"].(map[string]interface{}); ok {
+		schema.Properties = make(map[string]*genai.Schema)
+		for k, v := range props {
+			if vm, ok := v.(map[string]interface{}); ok {
+				schema.Properties[k] = buildSchemaFromMap(vm)
+			}
+		}
+	}
+	if enums, ok := m["enum"].([]interface{}); ok {
+		for _, e := range enums {
+			if s, ok := e.(string); ok {
+				schema.Enum = append(schema.Enum, s)
+			}
+		}
+	}
+	if required, ok := m["required"].([]interface{}); ok {
+		for _, r := range required {
+			if s, ok := r.(string); ok {
+				schema.Required = append(schema.Required, s)
+			}
+		}
+	}
+	return schema
+}
+
+func schemaTypeFromString(t string) genai.Type {
+	switch t {
+	case "STRING":
+		return genai.TypeString
+	case "NUMBER":
+		return genai.TypeNumber
+	case "INTEGER":
+		return genai.TypeInteger
+	case "BOOLEAN":
+		return genai.TypeBoolean
+	case "ARRAY":
+		return genai.TypeArray
+	case "OBJECT":
+		return genai.TypeObject
+	default:
+		return genai.TypeUnspecified
+	}
 }
 
 // serveGeminiStreamFromSDK 处理 Gemini 原生端点流式响应
@@ -1242,47 +1420,51 @@ func (s *Server) handleOpenAIStreamFromSDK(w http.ResponseWriter, streamFn iter.
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	clientDisconnected := make(chan struct{})
+	type streamResult struct {
+		resp *genai.GenerateContentResponse
+		err  error
+	}
+	resultCh := make(chan streamResult, 1)
+
 	go func() {
-		select {
-		case <-req.Context().Done():
-			close(clientDisconnected)
+		for resp, err := range streamFn {
+			resultCh <- streamResult{resp: resp, err: err}
 		}
+		close(resultCh)
 	}()
 
-	for response, err := range streamFn {
+	for {
 		select {
-		case <-clientDisconnected:
+		case <-req.Context().Done():
 			w.Write([]byte("data: [DONE]\n\n"))
 			return
-		default:
-		}
-
-		if err != nil {
-			return
-		}
-
-		chunk := buildOpenAIStreamChunkFromSDK(response)
-		if len(chunk) > 0 {
-			w.Write(chunk)
-			w.Write([]byte("\n\n"))
-			if f, ok := w.(http.Flusher); ok {
-				f.Flush()
+		case res, ok := <-resultCh:
+			if !ok {
+				// stream 结束
+				w.Write([]byte("data: [DONE]\n\n"))
+				if fl, ok3 := w.(http.Flusher); ok3 {
+					fl.Flush()
+				}
+				latency := time.Since(start).Milliseconds()
+				s.log.Info("Gemini SDK stream completed",
+					logger.LogField{Key: "model", Value: model},
+					logger.LogField{Key: "latency_ms", Value: latency},
+				)
+				return
+			}
+			if res.err != nil {
+				return
+			}
+			chunk := buildOpenAIStreamChunkFromSDK(res.resp)
+			if len(chunk) > 0 {
+				w.Write(chunk)
+				w.Write([]byte("\n\n"))
+				if fl, ok3 := w.(http.Flusher); ok3 {
+					fl.Flush()
+				}
 			}
 		}
 	}
-
-	// 发送 [DONE]
-	w.Write([]byte("data: [DONE]\n\n"))
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	}
-
-	latency := time.Since(start).Milliseconds()
-	s.log.Info("Gemini SDK stream completed",
-		logger.LogField{Key: "model", Value: model},
-		logger.LogField{Key: "latency_ms", Value: latency},
-	)
 }
 
 func buildOpenAIStreamChunkFromSDK(resp *genai.GenerateContentResponse) []byte {
@@ -1295,42 +1477,45 @@ func buildOpenAIStreamChunkFromSDK(resp *genai.GenerateContentResponse) []byte {
 		return nil
 	}
 
-	part := candidate.Content.Parts[0]
+	var toolCalls []map[string]interface{}
+	var text string
 
-	var delta map[string]interface{}
-
-	if part.FunctionCall != nil {
-		argsJSON := "{}"
-		if part.FunctionCall.Args != nil {
-			if b, err := json.Marshal(part.FunctionCall.Args); err == nil {
-				argsJSON = string(b)
+	for _, part := range candidate.Content.Parts {
+		if part.FunctionCall != nil {
+			argsJSON := "{}"
+			if part.FunctionCall.Args != nil {
+				if b, err := json.Marshal(part.FunctionCall.Args); err == nil {
+					argsJSON = string(b)
+				}
 			}
-		}
-		delta = map[string]interface{}{
-			"role": "assistant",
-			"tool_calls": []map[string]interface{}{{
-				"index": 0,
+			toolCalls = append(toolCalls, map[string]interface{}{
+				"index": len(toolCalls),
 				"id":    fmt.Sprintf("call_%s", part.FunctionCall.Name),
 				"type":  "function",
 				"function": map[string]interface{}{
 					"name":      part.FunctionCall.Name,
 					"arguments": argsJSON,
 				},
-			}},
-		}
-	} else if part.Text != "" {
-		delta = map[string]interface{}{
-			"role":    "assistant",
-			"content": part.Text,
+			})
+		} else if part.Text != "" {
+			text += part.Text
 		}
 	}
 
-	if delta == nil {
+	if text == "" && len(toolCalls) == 0 {
 		return nil
 	}
 
+	delta := map[string]interface{}{"role": "assistant"}
+	if text != "" {
+		delta["content"] = text
+	}
+	if len(toolCalls) > 0 {
+		delta["tool_calls"] = toolCalls
+	}
+
 	payload := map[string]interface{}{
-		"id": "gemini-sdk-stream",
+		"id":     "gemini-sdk-stream",
 		"object": "chat.completion.chunk",
 		"model":  resp.ModelVersion,
 		"choices": []map[string]interface{}{{
