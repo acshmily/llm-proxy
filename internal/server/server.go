@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"iter"
 	"net/http"
 	"net/http/httptrace"
 	"strings"
@@ -14,15 +15,17 @@ import (
 	"unicode/utf8"
 
 	"github.com/claude-projetc/llm-proxy/internal/config"
+	"github.com/claude-projetc/llm-proxy/internal/gemini"
 	"github.com/claude-projetc/llm-proxy/internal/logger"
 	"github.com/claude-projetc/llm-proxy/internal/middleware"
 	"github.com/claude-projetc/llm-proxy/internal/protocol/anthropic"
 	"github.com/claude-projetc/llm-proxy/internal/protocol/claude"
-	"github.com/claude-projetc/llm-proxy/internal/protocol/gemini"
+	protocolgemini "github.com/claude-projetc/llm-proxy/internal/protocol/gemini"
 	"github.com/claude-projetc/llm-proxy/internal/protocol/openai"
 	"github.com/claude-projetc/llm-proxy/internal/router"
 	"github.com/claude-projetc/llm-proxy/internal/stream"
 	"github.com/claude-projetc/llm-proxy/pkg/types"
+	"google.golang.org/genai"
 )
 
 type Server struct {
@@ -35,6 +38,7 @@ type Server struct {
 	wsTunnel      *WSTunnelMiddleware
 	debugRequests bool
 	debugMaxBody  int
+	geminiClient  *gemini.GeminiClient // SDK 客户端（nil 时 fallback 到 HTTP）
 }
 
 // PoolStats 连接池统计
@@ -109,6 +113,27 @@ func New(cfg *config.Config, r *router.Router, log *logger.Logger) *Server {
 		debugMaxBody = 2048
 	}
 
+	// 初始化 Gemini SDK 客户端
+	// 仅当使用标准 Gemini API URL 时才创建 SDK（非测试 mock 地址）
+	var geminiClient *gemini.GeminiClient
+	if cfg.Backends.Gemini.BaseURL != "" && isStandardGeminiAPI(cfg.Backends.Gemini.BaseURL) {
+		apiKey := findGeminiBackendKey(cfg.Routes)
+		gc, err := gemini.NewGeminiClient(
+			apiKey,
+			cfg.Backends.Gemini.HttpProxy,
+			log,
+			cfg.Logging.DebugRequests,
+			debugMaxBody,
+		)
+		if err != nil {
+			log.Error("Failed to create Gemini SDK client, fallback to HTTP",
+				logger.LogField{Key: "error", Value: err.Error()},
+			)
+		} else {
+			geminiClient = gc
+		}
+	}
+
 	s := &Server{
 		cfg:           cfg,
 		router:        r,
@@ -119,6 +144,7 @@ func New(cfg *config.Config, r *router.Router, log *logger.Logger) *Server {
 		wsTunnel:      wsTunnel,
 		debugRequests: cfg.Logging.DebugRequests,
 		debugMaxBody:  debugMaxBody,
+		geminiClient:  geminiClient,
 	}
 
 	// 配置 WebSocket 隧道的请求处理回调（在 s 创建之后）
@@ -209,6 +235,17 @@ func (s *Server) serveRequest(w http.ResponseWriter, r *http.Request) {
 		model = getDefaultModel(route.Backend)
 	}
 
+	// Gemini SDK 调用优先
+	if route.Backend == "gemini" && s.geminiClient != nil {
+		if err := s.serveRequestWithSDK(w, r, route, model, unified, start); err != nil {
+			s.log.Error("Gemini SDK call failed",
+				logger.LogField{Key: "error", Value: err.Error()},
+			)
+			s.writeError(w, http.StatusInternalServerError, "SDK call failed")
+		}
+		return
+	}
+
 	switch route.Backend {
 	case "openai":
 		backendURL = s.cfg.Backends.OpenAI.BaseURL + "/chat/completions"
@@ -222,7 +259,7 @@ func (s *Server) serveRequest(w http.ResponseWriter, r *http.Request) {
 		} else {
 			backendURL = s.cfg.Backends.Gemini.BaseURL + "/models/" + model + ":generateContent?key=" + route.BackendKey
 		}
-		reqBody, _ = gemini.Convert(unified, model)
+		reqBody, _ = protocolgemini.Convert(unified, model)
 	default:
 		s.writeError(w, http.StatusBadRequest, "Unknown backend")
 		return
@@ -322,6 +359,17 @@ func (s *Server) serveOpenAIRequest(w http.ResponseWriter, r *http.Request) {
 		model = getDefaultModel(route.Backend)
 	}
 
+	// Gemini SDK 调用优先
+	if route.Backend == "gemini" && s.geminiClient != nil {
+		if err := s.serveOpenAIWithSDK(w, r, route, model, unified, start); err != nil {
+			s.log.Error("Gemini SDK call failed",
+				logger.LogField{Key: "error", Value: err.Error()},
+			)
+			s.writeOpenAIError(w, http.StatusInternalServerError, "SDK call failed")
+		}
+		return
+	}
+
 	switch route.Backend {
 	case "openai":
 		backendURL = s.cfg.Backends.OpenAI.BaseURL + "/chat/completions"
@@ -335,7 +383,7 @@ func (s *Server) serveOpenAIRequest(w http.ResponseWriter, r *http.Request) {
 		} else {
 			backendURL = s.cfg.Backends.Gemini.BaseURL + "/models/" + model + ":generateContent?key=" + route.BackendKey
 		}
-		reqBody, err = gemini.Convert(unified, model)
+		reqBody, err = protocolgemini.Convert(unified, model)
 	default:
 		s.writeError(w, http.StatusBadRequest, "Unknown backend")
 		return
@@ -537,6 +585,17 @@ func (s *Server) serveCompletionsRequest(w http.ResponseWriter, r *http.Request)
 		model = getDefaultModel(route.Backend)
 	}
 
+	// Gemini SDK 调用优先
+	if route.Backend == "gemini" && s.geminiClient != nil {
+		if err := s.serveCompletionsWithSDK(w, r, route, model, unified, start); err != nil {
+			s.log.Error("Gemini SDK call failed (completions)",
+				logger.LogField{Key: "error", Value: err.Error()},
+			)
+			s.writeError(w, http.StatusInternalServerError, "SDK call failed")
+		}
+		return
+	}
+
 	var backendURL string
 	var reqBody []byte
 
@@ -553,7 +612,7 @@ func (s *Server) serveCompletionsRequest(w http.ResponseWriter, r *http.Request)
 		} else {
 			backendURL = s.cfg.Backends.Gemini.BaseURL + "/models/" + model + ":generateContent?key=" + route.BackendKey
 		}
-		reqBody, err = gemini.Convert(unified, model)
+		reqBody, err = protocolgemini.Convert(unified, model)
 	default:
 		s.writeError(w, http.StatusBadRequest, "Unknown backend")
 		return
@@ -655,7 +714,7 @@ func (s *Server) handleNonStream(w http.ResponseWriter, resp *http.Response, bac
 	case "anthropic":
 		unified, err = claude.ParseResponse(body)
 	case "gemini":
-		unified, err = gemini.ParseResponse(body, model)
+		unified, err = protocolgemini.ParseResponse(body, model)
 	}
 
 	if err != nil {
@@ -704,7 +763,7 @@ func (s *Server) handleOpenAINonStream(w http.ResponseWriter, resp *http.Respons
 	case "anthropic":
 		unified, err = claude.ParseResponse(body)
 	case "gemini":
-		unified, err = gemini.ParseResponse(body, model)
+		unified, err = protocolgemini.ParseResponse(body, model)
 	}
 
 	if err != nil {
@@ -730,6 +789,558 @@ func (s *Server) handleOpenAINonStream(w http.ResponseWriter, resp *http.Respons
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(respBody)
+}
+
+// serveOpenAIWithSDK 使用 SDK 处理 OpenAI → Gemini 调用
+func (s *Server) serveOpenAIWithSDK(w http.ResponseWriter, r *http.Request, route *router.Route, model string, unified *types.UnifiedMessage, start time.Time) error {
+	ctx, cancel := context.WithTimeout(r.Context(), route.Timeout)
+	defer cancel()
+
+	sdkModel, contents, sysInst, config, tools, err := protocolgemini.UnifiedMessageToSDK(unified)
+	if err != nil {
+		return err
+	}
+	if sysInst != nil {
+		config.SystemInstruction = sysInst
+	}
+	_ = tools // tools 已经在 config 中通过 UnifiedMessageToSDK 设置
+
+	s.log.Info("Gemini SDK request started",
+		logger.LogField{Key: "model", Value: model},
+		logger.LogField{Key: "stream", Value: unified.Stream},
+	)
+
+	if unified.Stream {
+		iter := s.geminiClient.GenerateContentStream(ctx, sdkModel, contents, config)
+		s.handleOpenAIStreamFromSDK(w, iter, model, r, start)
+	} else {
+		resp, err := s.geminiClient.GenerateContent(ctx, sdkModel, contents, config)
+		if err != nil {
+			return err
+		}
+
+		// Debug: log SDK 响应体
+		if s.debugRequests {
+			if restData, err := protocolgemini.SDKResponseToREST(resp); err == nil {
+				s.logResponseBody("/v1/chat/completions (sdk)", restData, 200)
+			}
+		}
+
+		unifiedResp, err := protocolgemini.FromSDKResponse(resp, model)
+		if err != nil {
+			return err
+		}
+
+		latency := time.Since(start).Milliseconds()
+		s.log.Info("Gemini SDK request completed",
+			logger.LogField{Key: "model", Value: model},
+			logger.LogField{Key: "latency_ms", Value: latency},
+			logger.LogField{Key: "input_tokens", Value: unifiedResp.Usage.InputTokens},
+			logger.LogField{Key: "output_tokens", Value: unifiedResp.Usage.OutputTokens},
+		)
+
+		respBody, err := openai.BuildResponse(unifiedResp)
+		if err != nil {
+			return err
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(respBody)
+	}
+
+	return nil
+}
+
+// serveRequestWithSDK 使用 SDK 处理 Anthropic 入口 → Gemini 调用
+func (s *Server) serveRequestWithSDK(w http.ResponseWriter, r *http.Request, route *router.Route, model string, unified *types.UnifiedMessage, start time.Time) error {
+	ctx, cancel := context.WithTimeout(r.Context(), route.Timeout)
+	defer cancel()
+
+	sdkModel, contents, sysInst, config, tools, err := protocolgemini.UnifiedMessageToSDK(unified)
+	if err != nil {
+		return err
+	}
+	if sysInst != nil {
+		config.SystemInstruction = sysInst
+	}
+	_ = tools
+
+	s.log.Info("Gemini SDK request started (Anthropic entry)",
+		logger.LogField{Key: "model", Value: model},
+		logger.LogField{Key: "stream", Value: unified.Stream},
+	)
+
+	if unified.Stream {
+		iter := s.geminiClient.GenerateContentStream(ctx, sdkModel, contents, config)
+		s.handleStreamFromSDK(w, iter, model, r, start)
+	} else {
+		resp, err := s.geminiClient.GenerateContent(ctx, sdkModel, contents, config)
+		if err != nil {
+			return err
+		}
+
+		if s.debugRequests {
+			if restData, err := protocolgemini.SDKResponseToREST(resp); err == nil {
+				s.logResponseBody("/v1/messages (sdk)", restData, 200)
+			}
+		}
+
+		unifiedResp, err := protocolgemini.FromSDKResponse(resp, model)
+		if err != nil {
+			return err
+		}
+
+		latency := time.Since(start).Milliseconds()
+		s.log.Info("Gemini SDK request completed",
+			logger.LogField{Key: "model", Value: model},
+			logger.LogField{Key: "latency_ms", Value: latency},
+			logger.LogField{Key: "input_tokens", Value: unifiedResp.Usage.InputTokens},
+			logger.LogField{Key: "output_tokens", Value: unifiedResp.Usage.OutputTokens},
+		)
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(unifiedResp)
+	}
+
+	return nil
+}
+
+// serveCompletionsWithSDK 使用 SDK 处理 Completions → Gemini 调用
+func (s *Server) serveCompletionsWithSDK(w http.ResponseWriter, r *http.Request, route *router.Route, model string, unified *types.UnifiedMessage, start time.Time) error {
+	ctx, cancel := context.WithTimeout(r.Context(), route.Timeout)
+	defer cancel()
+
+	sdkModel, contents, sysInst, config, tools, err := protocolgemini.UnifiedMessageToSDK(unified)
+	if err != nil {
+		return err
+	}
+	if sysInst != nil {
+		config.SystemInstruction = sysInst
+	}
+	_ = tools
+
+	s.log.Info("Gemini SDK request started (Completions)",
+		logger.LogField{Key: "model", Value: model},
+		logger.LogField{Key: "stream", Value: unified.Stream},
+	)
+
+	if unified.Stream {
+		iter := s.geminiClient.GenerateContentStream(ctx, sdkModel, contents, config)
+		s.handleCompletionsStreamFromSDK(w, iter, model, r, start)
+	} else {
+		resp, err := s.geminiClient.GenerateContent(ctx, sdkModel, contents, config)
+		if err != nil {
+			return err
+		}
+
+		unifiedResp, err := protocolgemini.FromSDKResponse(resp, model)
+		if err != nil {
+			return err
+		}
+
+		latency := time.Since(start).Milliseconds()
+		s.log.Info("Gemini SDK request completed (Completions)",
+			logger.LogField{Key: "model", Value: model},
+			logger.LogField{Key: "latency_ms", Value: latency},
+			logger.LogField{Key: "input_tokens", Value: unifiedResp.Usage.InputTokens},
+			logger.LogField{Key: "output_tokens", Value: unifiedResp.Usage.OutputTokens},
+		)
+
+		// 构建 Completions 格式响应
+		var text string
+		if len(unifiedResp.Content) > 0 {
+			text = unifiedResp.Content[0].Text
+		}
+		completionResp := map[string]interface{}{
+			"id":      unifiedResp.ID,
+			"object":  "text_completion",
+			"created": time.Now().Unix(),
+			"model":   unifiedResp.Model,
+			"choices": []map[string]interface{}{{
+				"text":          text,
+				"index":         0,
+				"finish_reason": unifiedResp.FinishReason,
+			}},
+		}
+		if unifiedResp.Usage.InputTokens > 0 || unifiedResp.Usage.OutputTokens > 0 {
+			completionResp["usage"] = map[string]interface{}{
+				"prompt_tokens":     unifiedResp.Usage.InputTokens,
+				"completion_tokens": unifiedResp.Usage.OutputTokens,
+				"total_tokens":      unifiedResp.Usage.InputTokens + unifiedResp.Usage.OutputTokens,
+			}
+		}
+
+		respBody, _ := json.Marshal(completionResp)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(respBody)
+	}
+
+	return nil
+}
+
+// handleStreamFromSDK 处理 Anthropic 入口流式响应
+func (s *Server) handleStreamFromSDK(w http.ResponseWriter, streamFn iter.Seq2[*genai.GenerateContentResponse, error], model string, req *http.Request, start time.Time) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	clientDisconnected := make(chan struct{})
+	go func() {
+		select {
+		case <-req.Context().Done():
+			close(clientDisconnected)
+		}
+	}()
+
+	for response, err := range streamFn {
+		select {
+		case <-clientDisconnected:
+			return
+		default:
+		}
+
+		if err != nil {
+			return
+		}
+
+		// 转换为 Anthropic SSE 格式
+		if len(response.Candidates) > 0 && response.Candidates[0].Content != nil {
+			for _, part := range response.Candidates[0].Content.Parts {
+				if part.Text != "" {
+					chunk := map[string]interface{}{
+						"type": "content_block_delta",
+						"delta": map[string]interface{}{
+							"type": "text_delta",
+							"text": part.Text,
+						},
+					}
+					data, _ := json.Marshal(chunk)
+					w.Write([]byte("event: content_block_delta\ndata: "))
+					w.Write(data)
+					w.Write([]byte("\n\n"))
+					if f, ok := w.(http.Flusher); ok {
+						f.Flush()
+					}
+				}
+			}
+		}
+	}
+
+	latency := time.Since(start).Milliseconds()
+	s.log.Info("Gemini SDK stream completed (Anthropic entry)",
+		logger.LogField{Key: "model", Value: model},
+		logger.LogField{Key: "latency_ms", Value: latency},
+	)
+}
+
+// handleCompletionsStreamFromSDK 处理 Completions 流式响应
+func (s *Server) handleCompletionsStreamFromSDK(w http.ResponseWriter, streamFn iter.Seq2[*genai.GenerateContentResponse, error], model string, req *http.Request, start time.Time) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	clientDisconnected := make(chan struct{})
+	go func() {
+		select {
+		case <-req.Context().Done():
+			close(clientDisconnected)
+		}
+	}()
+
+	for response, err := range streamFn {
+		select {
+		case <-clientDisconnected:
+			w.Write([]byte("data: [DONE]\n\n"))
+			return
+		default:
+		}
+
+		if err != nil {
+			return
+		}
+
+		if len(response.Candidates) > 0 && response.Candidates[0].Content != nil {
+			for _, part := range response.Candidates[0].Content.Parts {
+				if part.Text != "" {
+					chunk := map[string]interface{}{
+						"choices": []map[string]interface{}{{
+							"text":          part.Text,
+							"finish_reason": nil,
+						}},
+					}
+					data, _ := json.Marshal(chunk)
+					w.Write(append([]byte("data: "), data...))
+					w.Write([]byte("\n\n"))
+					if f, ok := w.(http.Flusher); ok {
+						f.Flush()
+					}
+				}
+			}
+		}
+	}
+
+	w.Write([]byte("data: [DONE]\n\n"))
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+
+	latency := time.Since(start).Milliseconds()
+	s.log.Info("Gemini SDK stream completed (Completions)",
+		logger.LogField{Key: "model", Value: model},
+		logger.LogField{Key: "latency_ms", Value: latency},
+	)
+}
+
+// serveGeminiWithSDK 使用 SDK 处理 Gemini 原生端点
+func (s *Server) serveGeminiWithSDK(w http.ResponseWriter, r *http.Request, route *router.Route, body []byte, start time.Time) {
+	ctx, cancel := context.WithTimeout(r.Context(), route.Timeout)
+	defer cancel()
+
+	// 解析原生请求
+	var nativeReq map[string]interface{}
+	if err := json.Unmarshal(body, &nativeReq); err != nil {
+		s.writeError(w, http.StatusBadRequest, "Invalid request format")
+		return
+	}
+
+	// 提取模型名
+	pathSuffix := strings.TrimPrefix(r.URL.Path, "/v1beta/models/")
+	model := strings.SplitN(pathSuffix, ":", 2)[0]
+	model = strings.TrimSuffix(model, "/")
+
+	// 转换为 SDK contents
+	contents, config := parseNativeGeminiRequest(nativeReq)
+
+	// 检查是否流式
+	isStream := strings.Contains(r.URL.Path, "streamGenerateContent")
+
+	s.log.Info("Gemini native SDK request started",
+		logger.LogField{Key: "model", Value: model},
+		logger.LogField{Key: "stream", Value: isStream},
+	)
+
+	if isStream {
+		iter := s.geminiClient.GenerateContentStream(ctx, model, contents, config)
+		s.serveGeminiStreamFromSDK(w, iter, model, start)
+	} else {
+		resp, err := s.geminiClient.GenerateContent(ctx, model, contents, config)
+		if err != nil {
+			s.writeError(w, http.StatusBadGateway, "SDK call failed")
+			return
+		}
+
+		latency := time.Since(start).Milliseconds()
+		s.log.Info("Gemini native SDK request completed",
+			logger.LogField{Key: "model", Value: model},
+			logger.LogField{Key: "latency_ms", Value: latency},
+		)
+
+		// 转换为 REST JSON 返回
+		restBody, err := protocolgemini.SDKResponseToREST(resp)
+		if err != nil {
+			s.writeError(w, http.StatusInternalServerError, "Failed to convert response")
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write(restBody)
+	}
+}
+
+// parseNativeGeminiRequest 将原生 Gemini 请求转换为 SDK contents 和 config
+func parseNativeGeminiRequest(req map[string]interface{}) ([]*genai.Content, *genai.GenerateContentConfig) {
+	var contents []*genai.Content
+	config := &genai.GenerateContentConfig{}
+
+	// 解析 contents
+	if rawContents, ok := req["contents"].([]interface{}); ok {
+		for _, c := range rawContents {
+			if cm, ok := c.(map[string]interface{}); ok {
+				content := &genai.Content{}
+				if role, ok := cm["role"].(string); ok {
+					content.Role = role
+				}
+				if parts, ok := cm["parts"].([]interface{}); ok {
+					for _, p := range parts {
+						if pm, ok := p.(map[string]interface{}); ok {
+							if text, ok := pm["text"].(string); ok {
+								content.Parts = append(content.Parts, &genai.Part{Text: text})
+							}
+						}
+					}
+				}
+				if len(content.Parts) > 0 {
+					contents = append(contents, content)
+				}
+			}
+		}
+	}
+
+	// 解析 generationConfig
+	if genCfg, ok := req["generationConfig"].(map[string]interface{}); ok {
+		if temp, ok := genCfg["temperature"].(float64); ok && temp > 0 {
+			t := float32(temp)
+			config.Temperature = &t
+		}
+		if topP, ok := genCfg["topP"].(float64); ok && topP > 0 {
+			tp := float32(topP)
+			config.TopP = &tp
+		}
+		if maxTokens, ok := genCfg["maxOutputTokens"].(float64); ok && maxTokens > 0 {
+			config.MaxOutputTokens = int32(maxTokens)
+		}
+		if stops, ok := genCfg["stopSequences"].([]interface{}); ok && len(stops) > 0 {
+			for _, s := range stops {
+				if ss, ok := s.(string); ok {
+					config.StopSequences = append(config.StopSequences, ss)
+				}
+			}
+		}
+	}
+
+	return contents, config
+}
+
+// serveGeminiStreamFromSDK 处理 Gemini 原生端点流式响应
+func (s *Server) serveGeminiStreamFromSDK(w http.ResponseWriter, streamFn iter.Seq2[*genai.GenerateContentResponse, error], model string, start time.Time) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	for response, err := range streamFn {
+		if err != nil {
+			return
+		}
+
+		restData, err := protocolgemini.SDKResponseToREST(response)
+		if err != nil {
+			continue
+		}
+
+		w.Write([]byte("data: "))
+		w.Write(restData)
+		w.Write([]byte("\n\n"))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+	}
+
+	latency := time.Since(start).Milliseconds()
+	s.log.Info("Gemini native SDK stream completed",
+		logger.LogField{Key: "model", Value: model},
+		logger.LogField{Key: "latency_ms", Value: latency},
+	)
+}
+
+// handleOpenAIStreamFromSDK 将 SDK 流式响应转换为 OpenAI SSE 格式
+func (s *Server) handleOpenAIStreamFromSDK(w http.ResponseWriter, streamFn iter.Seq2[*genai.GenerateContentResponse, error], model string, req *http.Request, start time.Time) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	clientDisconnected := make(chan struct{})
+	go func() {
+		select {
+		case <-req.Context().Done():
+			close(clientDisconnected)
+		}
+	}()
+
+	for response, err := range streamFn {
+		select {
+		case <-clientDisconnected:
+			w.Write([]byte("data: [DONE]\n\n"))
+			return
+		default:
+		}
+
+		if err != nil {
+			return
+		}
+
+		chunk := buildOpenAIStreamChunkFromSDK(response)
+		if len(chunk) > 0 {
+			w.Write(chunk)
+			w.Write([]byte("\n\n"))
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+	}
+
+	// 发送 [DONE]
+	w.Write([]byte("data: [DONE]\n\n"))
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+
+	latency := time.Since(start).Milliseconds()
+	s.log.Info("Gemini SDK stream completed",
+		logger.LogField{Key: "model", Value: model},
+		logger.LogField{Key: "latency_ms", Value: latency},
+	)
+}
+
+func buildOpenAIStreamChunkFromSDK(resp *genai.GenerateContentResponse) []byte {
+	if len(resp.Candidates) == 0 {
+		return nil
+	}
+
+	candidate := resp.Candidates[0]
+	if candidate.Content == nil || len(candidate.Content.Parts) == 0 {
+		return nil
+	}
+
+	part := candidate.Content.Parts[0]
+
+	var delta map[string]interface{}
+
+	if part.FunctionCall != nil {
+		argsJSON := "{}"
+		if part.FunctionCall.Args != nil {
+			if b, err := json.Marshal(part.FunctionCall.Args); err == nil {
+				argsJSON = string(b)
+			}
+		}
+		delta = map[string]interface{}{
+			"role": "assistant",
+			"tool_calls": []map[string]interface{}{{
+				"index": 0,
+				"id":    fmt.Sprintf("call_%s", part.FunctionCall.Name),
+				"type":  "function",
+				"function": map[string]interface{}{
+					"name":      part.FunctionCall.Name,
+					"arguments": argsJSON,
+				},
+			}},
+		}
+	} else if part.Text != "" {
+		delta = map[string]interface{}{
+			"role":    "assistant",
+			"content": part.Text,
+		}
+	}
+
+	if delta == nil {
+		return nil
+	}
+
+	payload := map[string]interface{}{
+		"id": "gemini-sdk-stream",
+		"object": "chat.completion.chunk",
+		"model":  resp.ModelVersion,
+		"choices": []map[string]interface{}{{
+			"index": 0,
+			"delta": delta,
+		}},
+	}
+
+	result, _ := json.Marshal(payload)
+	return append([]byte("data: "), result...)
 }
 
 // handleOpenAIStream 处理 OpenAI 流式响应
@@ -817,16 +1428,19 @@ func (s *Server) serveGeminiRequest(w http.ResponseWriter, r *http.Request) {
 
 	s.logRequestBody(r.URL.Path, body)
 
-	// 直接转发请求路径（/v1beta/models/... -> backend BaseURL + path）
-	// 规范化路径拼接：BaseURL 可能已包含 /v1beta，需要避免重复
+	// 使用 SDK 调用（如果可用）
+	if s.geminiClient != nil {
+		s.serveGeminiWithSDK(w, r, route, body, start)
+		return
+	}
+
+	// Fallback: 直接转发
 	baseURL := strings.TrimSuffix(s.cfg.Backends.Gemini.BaseURL, "/")
 	path := strings.TrimPrefix(r.URL.Path, "/")
-	// 如果 BaseURL 以 /v1beta 结尾且请求路径也以 /v1beta 开头，去重
 	if strings.HasSuffix(baseURL, "/v1beta") && strings.HasPrefix(path, "v1beta/") {
 		path = strings.TrimPrefix(path, "v1beta/")
 	}
 	backendURL := baseURL + "/" + path
-	// 保留原始查询参数，并附加 Gemini API Key
 	if r.URL.RawQuery != "" {
 		backendURL += "?" + r.URL.RawQuery + "&key=" + route.BackendKey
 	} else {
@@ -835,14 +1449,12 @@ func (s *Server) serveGeminiRequest(w http.ResponseWriter, r *http.Request) {
 
 	s.logBackendRequest(backendURL, body)
 
-	// 创建后端请求
 	backendReq, err := http.NewRequest(r.Method, backendURL, bytes.NewReader(body))
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "Failed to create backend request")
 		return
 	}
 
-	// 只转发对 Gemini API 有意义的请求头（白名单策略）
 	forwardHeaders := []string{
 		"Content-Type",
 		"User-Agent",
@@ -857,12 +1469,10 @@ func (s *Server) serveGeminiRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	backendReq.Header.Set("Content-Type", "application/json")
 
-	// 添加超时
 	ctx, cancel := context.WithTimeout(r.Context(), route.Timeout)
 	defer cancel()
 	backendReq = backendReq.WithContext(ctx)
 
-	// 发送请求
 	resp, err := s.client.Do(backendReq)
 	if err != nil {
 		s.writeError(w, http.StatusBadGateway, "Failed to reach backend")
@@ -876,7 +1486,6 @@ func (s *Server) serveGeminiRequest(w http.ResponseWriter, r *http.Request) {
 
 	latency := time.Since(start).Milliseconds()
 
-	// 转发响应头
 	for k, vv := range resp.Header {
 		if k != "Content-Length" {
 			for _, v := range vv {
@@ -915,7 +1524,7 @@ func (s *Server) handleCompletionsNonStream(w http.ResponseWriter, resp *http.Re
 	case "anthropic":
 		unified, err = claude.ParseResponse(body)
 	case "gemini":
-		unified, err = gemini.ParseResponse(body, model)
+		unified, err = protocolgemini.ParseResponse(body, model)
 	}
 
 	if err != nil {
@@ -1534,6 +2143,22 @@ func (s *Server) serveModelsList(w http.ResponseWriter, r *http.Request) {
 func extractBearerToken(auth string) string {
 	if len(auth) > 7 && auth[:7] == "Bearer " {
 		return auth[7:]
+	}
+	return ""
+}
+
+// isStandardGeminiAPI 判断是否为标准 Gemini API URL（非测试 mock）
+func isStandardGeminiAPI(baseURL string) bool {
+	return strings.Contains(baseURL, "generativelanguage.googleapis.com") ||
+		strings.Contains(baseURL, "ai.google.dev")
+}
+
+// findGeminiBackendKey 从路由配置中查找 Gemini 后端的 API Key
+func findGeminiBackendKey(routes []config.RouteConfig) string {
+	for _, r := range routes {
+		if r.Backend == "gemini" {
+			return r.BackendKey
+		}
 	}
 	return ""
 }
