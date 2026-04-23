@@ -5,6 +5,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.1] - 2026-04-23
+
+### 修复
+- **流式 clientDisconnected 检测**: `handleCompletionsStreamFromSDK` 重构为 goroutine+channel 模式，确保客户端断开时正确终止流
+- **流式 finish_reason**: Completions 流式响应在 `[DONE]` 前发送带 `finish_reason: "stop"` 的结束 chunk
+- **Gemini 原生端点解析**: `parseNativeGeminiRequest` 新增 `systemInstruction`、`tools`、`toolConfig` 解析
+- **Schema 转换**: 新增 `buildSchemaFromMap` 将 JSON Schema 正确转换为 `genai.Schema`
+- **Flusher 类型断言**: 修复流式处理中类型断言变量遮蔽导致的编译错误
+
+---
+
 ## [0.8.0] - 2026-04-23
 
 ### 新增
