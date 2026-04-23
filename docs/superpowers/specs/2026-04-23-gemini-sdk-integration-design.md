@@ -57,14 +57,55 @@ func (c *GeminiClient) GenerateStream(ctx, model string, contents []*genai.Conte
 - 处理 `tool_calls`、`function_calls` 的双向转换
 - SDK Response → REST JSON（原生端点兼容）
 
-**关键转换映射**:
-| Unified | genai |
-|---------|-------|
-| Message.Role "user" | Content.Role "user" |
-| Message.Role "assistant" | Content.Role "model" |
-| Message.Role "tool" | Content.Part = FunctionResponse |
-| ToolCalls | Tool{FunctionDeclarations} |
-| Temperature | GenerationConfig.Temperature |
+**关键转换映射（完整版）**:
+
+当前 `converter.go` 已支持的参数：
+| Unified 字段 | 当前状态 | Gemini SDK 映射 |
+|-------------|---------|----------------|
+| Messages[].Role | 映射 user/assistant/tool | Content.Role |
+| Messages[].Content | 构建 text part | Content.Parts[].Text |
+| Messages[].ToolCalls | 构建 functionCall part | Content.Parts[].FunctionCall |
+| Tools[] | functionDeclarations | Tool.FunctionDeclarations |
+| Temperature | generationConfig.temperature | GenerationConfig.Temperature |
+
+当前 `converter.go` **缺失**需要补全的参数：
+| Unified 字段 | 缺失情况 | Gemini SDK 映射 |
+|-------------|---------|----------------|
+| MaxTokens | ❌ 未转换 | GenerationConfig.MaxOutputTokens |
+| StopSequences | ❌ 未转换 | GenerationConfig.StopSequences |
+| TopP | ❌ 未转换 | GenerationConfig.TopP |
+| system/developer 角色 | 映射为 user | SystemInstruction（SDK 原生支持） |
+| Stream | 仅 URL 参数 | GenerateContentStream Iterator |
+
+**三种入口的完整转换链路**:
+
+```
+/v1/messages (Anthropic)
+  → anthropic.ParseRequest() → UnifiedMessage
+  → sdk_adapter.ToSDKContents() → genai.Content[] + Config
+  → client.Generate/GenerateStream() → genai.Response
+  → sdk_adapter.FromSDKResponse() → UnifiedResponse
+  → 返回 Anthropic 格式
+
+/v1/chat/completions (OpenAI Chat)
+  → openai.ParseRequest() → UnifiedMessage
+  → sdk_adapter.ToSDKContents() → genai.Content[] + Config
+  → client.Generate/GenerateStream() → genai.Response
+  → sdk_adapter.FromSDKResponse() → UnifiedResponse
+  → openai.BuildResponse() → OpenAI 格式
+
+/v1/completions (OpenAI 旧版)
+  → 解析 prompt/messages → UnifiedMessage
+  → sdk_adapter.ToSDKContents() → genai.Content[] + Config
+  → client.Generate/GenerateStream() → genai.Response
+  → sdk_adapter.FromSDKResponse() → UnifiedResponse
+  → buildCompletionsResponse() → Completions 格式
+```
+
+**System Prompt 处理变更**:
+- 当前: `system`/`developer` 角色映射为 `"user"`（消息合并到 contents 首部）
+- 新版: 使用 `genai.SystemInstruction` 独立传递，不混入 contents
+- 好处: 更准确地传达系统指令，避免角色交替违规
 
 ### 修改文件
 
