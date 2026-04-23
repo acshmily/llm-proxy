@@ -5,6 +5,22 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)，
 项目遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.0] - 2026-04-23
+
+### 新增
+- **Gemini SDK 集成**: Gemini 后端调用迁移至 `google.golang.org/genai` 官方 SDK
+- **HTTP 代理支持**: Gemini 后端可通过 `http_proxy` 配置使用代理
+- **完整参数映射**: 补全 `max_tokens`, `top_p`, `stop_sequences`, `tool_choice` 参数转换
+- **SystemInstruction**: system/developer 角色消息使用 Gemini 原生 SystemInstruction，不再混入 user contents
+- **tool_calls 和 usage**: OpenAI BuildResponse 补全 tool_calls 和 usage 字段回写
+- **SDK 调试日志**: 开启 `debug_requests` 后可在 `journalctl -u llm-proxy -f` 看到完整 SDK 请求/响应流程
+
+### 变更
+- 所有 Gemini 调用（OpenAI Chat、Completions、Anthropic、Native 端点）统一走 SDK
+- 保留 HTTP 调用路径作为 fallback（测试/mock 场景自动使用 HTTP）
+
+---
+
 ## [0.7.9] - 2026-04-22
 
 ### 新增
